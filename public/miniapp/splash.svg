@@ -1,0 +1,14 @@
+<svg width="1200" height="1200" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Daily Orbit Splash Image</title>
+  <desc id="desc">Splash image for Daily Orbit mini app launch</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1D2A52" />
+      <stop offset="100%" stop-color="#4D6FFF" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="1200" fill="url(#bg)" />
+  <circle cx="600" cy="600" r="280" fill="#F4E7C5" opacity="0.92" />
+  <circle cx="695" cy="540" r="230" fill="#1D2A52" />
+  <text x="180" y="980" fill="#F8F3E8" font-size="132" font-family="Pretendard, sans-serif" font-weight="700">Daily Orbit</text>
+</svg>
