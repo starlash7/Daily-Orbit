@@ -1,6 +1,9 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { sdk } from "@farcaster/miniapp-sdk";
 import { base } from "wagmi/chains";
 import {
   useAccount,
@@ -12,6 +15,7 @@ import {
 } from "wagmi";
 import { erc20Abi } from "viem";
 
+import type { FortuneCategory } from "@/lib/fortune";
 import {
   BASE_USDC_ADDRESS,
   getDeepReadingPriceLabel,
@@ -20,7 +24,6 @@ import {
   hasValidPaymentRecipient,
   toBaseScanTxUrl
 } from "@/lib/payments";
-import type { FortuneCategory } from "@/lib/fortune";
 
 type DrawResponse = {
   drawId: string;
@@ -36,12 +39,67 @@ type DrawResponse = {
   };
 };
 
+type ProfileState = {
+  name: string;
+  username: string;
+  avatarUrl: string;
+};
+
+type MiniAppContextUser = {
+  displayName?: string;
+  username?: string;
+  fid?: string | number;
+  pfpUrl?: string;
+  avatarUrl?: string;
+};
+
+type MiniAppContext = {
+  user?: MiniAppContextUser;
+};
+
+type HistoryEntry = {
+  drawId: string;
+  dateKey: string;
+  categoryLabel: string;
+  headline: string;
+  luckyNumber: number;
+};
+
+type ThemeMode = "light" | "dark";
+type TabKey = "today" | "history" | "profile";
+
 const CATEGORIES: Array<{ key: FortuneCategory; label: string; hint: string }> = [
-  { key: "love", label: "Love", hint: "Connection & feelings" },
-  { key: "money", label: "Money", hint: "Spending & choices" },
-  { key: "career", label: "Career", hint: "Work & progress" },
-  { key: "health", label: "Health", hint: "Energy & recovery" }
+  { key: "love", label: "Love", hint: "Connection and closeness" },
+  { key: "money", label: "Money", hint: "Spending and timing" },
+  { key: "career", label: "Career", hint: "Work and momentum" },
+  { key: "health", label: "Health", hint: "Energy and balance" }
 ];
+
+const ONBOARDING_STEPS = [
+  {
+    eyebrow: "Welcome",
+    title: "A clean daily read in under a minute",
+    description: "Pick one category, check the insight, and decide your next move without friction."
+  },
+  {
+    eyebrow: "Onchain unlock",
+    title: "Unlock the deeper read with 0.1 USDC",
+    description: "The free card gives the headline. The paid card adds opportunity, caution, and action guidance."
+  },
+  {
+    eyebrow: "Built for Base",
+    title: "Save, return, and keep a gentle streak",
+    description: "Use the bottom navigation to move between today, history, and your profile with one thumb."
+  }
+] as const;
+
+const STORAGE_KEYS = {
+  streakDate: "daily-orbit:last-draw-date",
+  streakCount: "daily-orbit:streak-count",
+  drawHistory: "daily-orbit:draw-history",
+  onboarding: "daily-orbit:onboarding-complete",
+  theme: "daily-orbit:theme"
+} as const;
 
 function formatDisplayDate(input: string): string {
   const date = new Date(`${input}T00:00:00`);
@@ -64,16 +122,37 @@ function toPreviousDateKey(todayKey: string): string {
   return toDateKey(baseDate);
 }
 
-function shortenAddress(address?: string): string {
-  if (!address) return "Not connected";
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
-
 function getUserFriendlyError(message: string): string {
   if (message.includes("User rejected")) return "Transaction was rejected in wallet.";
   if (message.includes("insufficient funds")) return "Insufficient balance for this transaction.";
   if (message.includes("connector")) return "Wallet connection failed. Please reconnect.";
   return "Payment failed. Please try again.";
+}
+
+function getInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+function getPreferredTheme(): ThemeMode {
+  if (typeof window === "undefined") return "light";
+
+  const stored = window.localStorage.getItem(STORAGE_KEYS.theme);
+  if (stored === "light" || stored === "dark") return stored;
+
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function getDefaultProfile(): ProfileState {
+  return {
+    name: "Orbit Guest",
+    username: "Ready to start",
+    avatarUrl: ""
+  };
 }
 
 export default function HomePage(): React.JSX.Element {
@@ -85,6 +164,13 @@ export default function HomePage(): React.JSX.Element {
   const [deepUnlocked, setDeepUnlocked] = useState<boolean>(false);
   const [notice, setNotice] = useState<string>("");
   const [paymentHash, setPaymentHash] = useState<`0x${string}` | undefined>(undefined);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [profile, setProfile] = useState<ProfileState>(getDefaultProfile);
+  const [activeTab, setActiveTab] = useState<TabKey>("today");
+  const [theme, setTheme] = useState<ThemeMode>("light");
+  const [onboardingIndex, setOnboardingIndex] = useState<number>(0);
+  const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
+  const [autoConnectTried, setAutoConnectTried] = useState<boolean>(false);
 
   const { address, chainId, isConnected } = useAccount();
   const { connectAsync, connectors, isPending: isConnecting } = useConnect();
@@ -109,12 +195,15 @@ export default function HomePage(): React.JSX.Element {
   const deepReadingPriceLabel = getDeepReadingPriceLabel();
   const deepReadingPriceUnits = getDeepReadingPriceUnits();
 
-  const updateStreak = useCallback((dateKey: string) => {
-    const streakDateKey = "daily-orbit:last-draw-date";
-    const streakCountKey = "daily-orbit:streak-count";
+  const updateHistory = useCallback((entry: HistoryEntry) => {
+    const next = [entry, ...history.filter((item) => item.drawId !== entry.drawId)].slice(0, 8);
+    setHistory(next);
+    window.localStorage.setItem(STORAGE_KEYS.drawHistory, JSON.stringify(next));
+  }, [history]);
 
-    const previousDate = localStorage.getItem(streakDateKey);
-    const previousCount = Number(localStorage.getItem(streakCountKey) || "0");
+  const updateStreak = useCallback((dateKey: string) => {
+    const previousDate = window.localStorage.getItem(STORAGE_KEYS.streakDate);
+    const previousCount = Number(window.localStorage.getItem(STORAGE_KEYS.streakCount) || "0");
 
     if (previousDate === dateKey) {
       setStreak(previousCount);
@@ -124,8 +213,8 @@ export default function HomePage(): React.JSX.Element {
     const yesterday = toPreviousDateKey(dateKey);
     const nextCount = previousDate === yesterday ? previousCount + 1 : 1;
 
-    localStorage.setItem(streakDateKey, dateKey);
-    localStorage.setItem(streakCountKey, String(nextCount));
+    window.localStorage.setItem(STORAGE_KEYS.streakDate, dateKey);
+    window.localStorage.setItem(STORAGE_KEYS.streakCount, String(nextCount));
     setStreak(nextCount);
   }, []);
 
@@ -146,6 +235,13 @@ export default function HomePage(): React.JSX.Element {
         setDeepUnlocked(false);
         setPaymentHash(undefined);
         updateStreak(result.dateKey);
+        updateHistory({
+          drawId: result.drawId,
+          dateKey: result.dateKey,
+          categoryLabel: result.categoryLabel,
+          headline: result.fortune.headline,
+          luckyNumber: result.fortune.luckyNumber
+        });
       } catch (drawError) {
         setError(
           drawError instanceof Error
@@ -156,20 +252,67 @@ export default function HomePage(): React.JSX.Element {
         setLoading(false);
       }
     },
-    [updateStreak]
+    [updateHistory, updateStreak]
   );
 
   useEffect(() => {
-    const stored = Number(localStorage.getItem("daily-orbit:streak-count") || "0");
-    if (Number.isFinite(stored)) {
-      setStreak(stored);
+    const storedHistory = window.localStorage.getItem(STORAGE_KEYS.drawHistory);
+    const storedStreak = Number(window.localStorage.getItem(STORAGE_KEYS.streakCount) || "0");
+
+    if (Number.isFinite(storedStreak)) {
+      setStreak(storedStreak);
     }
-    fetchDraw("love", address).catch(() => undefined);
-  }, [address, fetchDraw]);
+
+    if (storedHistory) {
+      try {
+        const parsed = JSON.parse(storedHistory) as HistoryEntry[];
+        setHistory(parsed);
+      } catch {
+        window.localStorage.removeItem(STORAGE_KEYS.drawHistory);
+      }
+    }
+
+    const nextTheme = getPreferredTheme();
+    setTheme(nextTheme);
+    document.documentElement.dataset.theme = nextTheme;
+
+    const hasSeenOnboarding = window.localStorage.getItem(STORAGE_KEYS.onboarding) === "true";
+    setShowOnboarding(!hasSeenOnboarding);
+
+    void sdk.actions.ready().catch(() => undefined);
+
+    void sdk.context
+      .then((context: MiniAppContext) => {
+        const user = context?.user ?? {};
+        const displayName = user.displayName || user.username || "Orbit Explorer";
+        const username = user.username ? `@${user.username}` : user.fid ? `Base user ${user.fid}` : "Base mini app member";
+        const avatarUrl = user.pfpUrl || user.avatarUrl || "";
+
+        setProfile({
+          name: displayName,
+          username,
+          avatarUrl
+        });
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (address) {
+      setProfile((current) => {
+        if (current.name !== "Orbit Guest") return current;
+        return {
+          name: "Base Explorer",
+          username: "Wallet ready on Base",
+          avatarUrl: current.avatarUrl
+        };
+      });
+    }
+  }, [address]);
 
   useEffect(() => {
     if (!notice) return undefined;
-    const timer = window.setTimeout(() => setNotice(""), 1800);
+    const timer = window.setTimeout(() => setNotice(""), 2200);
     return () => window.clearTimeout(timer);
   }, [notice]);
 
@@ -184,6 +327,41 @@ export default function HomePage(): React.JSX.Element {
     if (!paymentReceiptError) return;
     setError(getUserFriendlyError(paymentReceiptError.message));
   }, [paymentReceiptError]);
+
+  useEffect(() => {
+    if (autoConnectTried || isConnected || connectors.length === 0) return;
+
+    let cancelled = false;
+
+    void sdk.isInMiniApp()
+      .then(async (insideMiniApp) => {
+        if (!insideMiniApp || cancelled) return;
+        const coinbaseConnector =
+          connectors.find((connector) => connector.name.toLowerCase().includes("coinbase")) ?? connectors[0];
+
+        if (!coinbaseConnector) return;
+
+        try {
+          await connectAsync({ connector: coinbaseConnector });
+        } catch {
+          // no-op: keep manual connect available
+        } finally {
+          if (!cancelled) setAutoConnectTried(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAutoConnectTried(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [autoConnectTried, connectAsync, connectors, isConnected]);
+
+  useEffect(() => {
+    if (draw) return;
+    void fetchDraw("love", address).catch(() => undefined);
+  }, [address, draw, fetchDraw]);
 
   const shareText = useMemo(() => {
     if (!draw) return "";
@@ -220,11 +398,10 @@ export default function HomePage(): React.JSX.Element {
 
   const handleConnectWallet = useCallback(async () => {
     setError("");
+
     try {
       const coinbaseConnector =
-        connectors.find((connector) =>
-          connector.name.toLowerCase().includes("coinbase")
-        ) ?? connectors[0];
+        connectors.find((connector) => connector.name.toLowerCase().includes("coinbase")) ?? connectors[0];
 
       if (!coinbaseConnector) {
         setError("No wallet connector is available.");
@@ -250,9 +427,7 @@ export default function HomePage(): React.JSX.Element {
   }, [disconnect]);
 
   const handleUnlockDeepReading = useCallback(async () => {
-    if (deepUnlocked) {
-      return;
-    }
+    if (deepUnlocked) return;
 
     if (!isConnected) {
       setNotice("Connect your wallet first.");
@@ -299,11 +474,23 @@ export default function HomePage(): React.JSX.Element {
     writeContractAsync
   ]);
 
+  const handleCloseOnboarding = useCallback(() => {
+    window.localStorage.setItem(STORAGE_KEYS.onboarding, "true");
+    setShowOnboarding(false);
+    setOnboardingIndex(0);
+  }, []);
+
+  const handleThemeToggle = useCallback(() => {
+    setTheme((current) => {
+      const next = current === "light" ? "dark" : "light";
+      document.documentElement.dataset.theme = next;
+      window.localStorage.setItem(STORAGE_KEYS.theme, next);
+      return next;
+    });
+  }, []);
+
   const displayDate = draw ? formatDisplayDate(draw.dateKey) : formatDisplayDate(toDateKey(new Date()));
-  const selectedLabel = useMemo(
-    () => CATEGORIES.find((item) => item.key === selectedCategory)?.label ?? "Love",
-    [selectedCategory]
-  );
+  const selectedLabel = CATEGORIES.find((item) => item.key === selectedCategory)?.label ?? "Love";
   const heroHeadline = draw?.fortune.headline ?? "Check your daily flow in under a minute.";
 
   const unlockButtonLabel = deepUnlocked
@@ -314,25 +501,49 @@ export default function HomePage(): React.JSX.Element {
         ? "Confirming payment..."
         : `Unlock deep reading (${deepReadingPriceLabel} USDC)`;
 
+  const paymentEnabled = hasRecipient;
+  const currentStep = ONBOARDING_STEPS[onboardingIndex];
+
   return (
-    <main className="premium-root">
-      <section className="app-frame">
-        <header className="app-header">
-          <div className="app-title-block">
-            <p className="app-kicker">Daily Orbit</p>
-            <h1 className="app-title">Daily Fortune</h1>
+    <main className="app-root">
+      <div className="app-shell">
+        <header className="topbar">
+          <div>
+            <p className="brand-label">Daily Orbit</p>
+            <h1 className="brand-title">A premium daily read on Base</h1>
           </div>
 
-          <div className="wallet-panel">
-            <p className="wallet-address">{shortenAddress(address)}</p>
+          <div className="topbar-actions">
+            <button type="button" className="theme-toggle" onClick={handleThemeToggle}>
+              {theme === "light" ? "Dark" : "Light"}
+            </button>
+            <span className="streak-pill">{streak} day streak</span>
+          </div>
+        </header>
+
+        <section className="profile-banner">
+          <div className="avatar-shell">
+            {profile.avatarUrl ? (
+              <img src={profile.avatarUrl} alt={profile.name} className="avatar-image" />
+            ) : (
+              <span>{getInitials(profile.name)}</span>
+            )}
+          </div>
+
+          <div className="profile-copy">
+            <p className="profile-name">{profile.name}</p>
+            <p className="profile-username">{profile.username}</p>
+          </div>
+
+          <div className="profile-actions">
             {isConnected ? (
-              <button type="button" className="wallet-button secondary" onClick={handleDisconnectWallet}>
-                Disconnect
+              <button type="button" className="secondary-button" onClick={handleDisconnectWallet}>
+                Connected
               </button>
             ) : (
               <button
                 type="button"
-                className="wallet-button"
+                className="secondary-button accent"
                 onClick={handleConnectWallet}
                 disabled={isConnecting}
               >
@@ -340,126 +551,282 @@ export default function HomePage(): React.JSX.Element {
               </button>
             )}
           </div>
-        </header>
-
-        <section className="insight-hero" aria-label="today insight">
-          <p className="insight-kicker">Today&apos;s insight</p>
-          <p className="insight-main">{heroHeadline}</p>
-          <p className="insight-sub">A focused one-line read, then your next action.</p>
-          <p className="insight-streak">Current streak: {streak} days</p>
-          <p className="insight-date">{displayDate}</p>
         </section>
 
-        <section className="block-card">
-          <div className="block-head">
-            <h2 className="block-title">Select a category</h2>
-            <span className="block-meta">Current: {selectedLabel}</span>
-          </div>
-
-          <div className="category-grid">
-            {CATEGORIES.map((category) => (
-              <button
-                key={category.key}
-                type="button"
-                className={category.key === selectedCategory ? "category-item active" : "category-item"}
-                onClick={() => setSelectedCategory(category.key)}
-              >
-                <span className="category-label">{category.label}</span>
-                <span className="category-hint">{category.hint}</span>
-              </button>
-            ))}
-          </div>
-
+        <nav className="bottom-nav" aria-label="Primary navigation">
           <button
             type="button"
-            className="primary-action"
-            disabled={loading}
-            onClick={() => fetchDraw(selectedCategory, address)}
+            className={activeTab === "today" ? "nav-item active" : "nav-item"}
+            onClick={() => setActiveTab("today")}
           >
-            {loading ? "Loading your fortune..." : "Check today's fortune"}
+            <span>Today</span>
+            <small>Read</small>
           </button>
-        </section>
+          <button
+            type="button"
+            className={activeTab === "history" ? "nav-item active" : "nav-item"}
+            onClick={() => setActiveTab("history")}
+          >
+            <span>History</span>
+            <small>Past cards</small>
+          </button>
+          <button
+            type="button"
+            className={activeTab === "profile" ? "nav-item active" : "nav-item"}
+            onClick={() => setActiveTab("profile")}
+          >
+            <span>Profile</span>
+            <small>Settings</small>
+          </button>
+        </nav>
 
-        <section className="block-card result-card">
-          <div className="block-head">
-            <h2 className="block-title">Your reading</h2>
-            <span className="block-meta">{displayDate}</span>
-          </div>
-
-          {error ? <p className="error-copy">{error}</p> : null}
-
-          {draw ? (
-            <>
-              <article>
-                <p className="result-chip">{draw.categoryLabel}</p>
-                <h3 className="result-title">{draw.fortune.headline}</h3>
-                <p className="result-body">{draw.fortune.detail}</p>
-              </article>
-
-              <div className="metrics-grid">
-                <div className="metric">
-                  <small>Lucky color</small>
-                  <strong>{draw.fortune.luckyColor}</strong>
-                </div>
-                <div className="metric">
-                  <small>Lucky number</small>
-                  <strong>{draw.fortune.luckyNumber}</strong>
-                </div>
-                <div className="metric">
-                  <small>Mood tag</small>
-                  <strong>{draw.fortune.moodTag}</strong>
-                </div>
+        {activeTab === "today" ? (
+          <>
+            <section className="hero-card">
+              <div>
+                <p className="section-eyebrow">Today&apos;s insight</p>
+                <h2 className="hero-headline">{heroHeadline}</h2>
+                <p className="hero-caption">{displayDate}</p>
               </div>
-
-              <div className="action-group">
-                <button type="button" className="tertiary-action" onClick={handleShare}>
-                  Share result
-                </button>
-
-                <button
-                  type="button"
-                  className="tertiary-action"
-                  onClick={handleUnlockDeepReading}
-                  disabled={
-                    deepUnlocked ||
-                    isSwitchingChain ||
-                    isSendingPayment ||
-                    isConfirmingPayment ||
-                    !hasRecipient
-                  }
-                >
-                  {unlockButtonLabel}
-                </button>
-              </div>
-
-              {!hasRecipient ? (
-                <p className="config-warning">Set NEXT_PUBLIC_USDC_RECEIVER to enable onchain unlock.</p>
-              ) : null}
-
-              {paymentHash ? (
-                <p className="tx-line">
-                  Transaction submitted. <a href={toBaseScanTxUrl(paymentHash)} target="_blank" rel="noreferrer">View on BaseScan</a>
-                </p>
-              ) : null}
-            </>
-          ) : (
-            <p className="empty-copy">Pick a category and tap the button to load your reading.</p>
-          )}
-
-          {deepUnlocked ? (
-            <section className="deep-card">
-              <h4 className="deep-title">Deep reading</h4>
-              <ul className="deep-list">
-                <li>Opportunity: Start one meaningful conversation early today.</li>
-                <li>Watch out: Don&apos;t rush decisions before checking context.</li>
-                <li>Relationships: A clear and kind message can improve trust.</li>
-                <li>Action: Spend ten minutes outlining your next step tonight.</li>
-              </ul>
-              <p className="tiny-note">Onchain payment confirmed on Base.</p>
+              <p className="hero-note">Clear first action, no clutter, and one-thumb navigation.</p>
             </section>
-          ) : null}
-        </section>
-      </section>
+
+            <section className="panel-card">
+              <div className="panel-head">
+                <div>
+                  <p className="section-eyebrow">Step 1</p>
+                  <h3 className="panel-title">Select a category</h3>
+                </div>
+                <span className="panel-meta">Current: {selectedLabel}</span>
+              </div>
+
+              <div className="category-grid">
+                {CATEGORIES.map((category) => (
+                  <button
+                    key={category.key}
+                    type="button"
+                    className={category.key === selectedCategory ? "category-item active" : "category-item"}
+                    onClick={() => setSelectedCategory(category.key)}
+                  >
+                    <span className="category-label">{category.label}</span>
+                    <span className="category-hint">{category.hint}</span>
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                className="primary-button"
+                disabled={loading}
+                onClick={() => fetchDraw(selectedCategory, address)}
+              >
+                {loading ? "Loading your fortune..." : "Check today's fortune"}
+              </button>
+            </section>
+
+            <section className="panel-card">
+              <div className="panel-head">
+                <div>
+                  <p className="section-eyebrow">Step 2</p>
+                  <h3 className="panel-title">Your reading</h3>
+                </div>
+                <span className="panel-meta">{displayDate}</span>
+              </div>
+
+              {error ? <p className="error-copy">{error}</p> : null}
+
+              {draw ? (
+                <>
+                  <article className="reading-card">
+                    <p className="result-chip">{draw.categoryLabel}</p>
+                    <h4 className="reading-title">{draw.fortune.headline}</h4>
+                    <p className="reading-body">{draw.fortune.detail}</p>
+                  </article>
+
+                  <div className="metrics-grid">
+                    <div className="metric-card">
+                      <small>Lucky color</small>
+                      <strong>{draw.fortune.luckyColor}</strong>
+                    </div>
+                    <div className="metric-card">
+                      <small>Lucky number</small>
+                      <strong>{draw.fortune.luckyNumber}</strong>
+                    </div>
+                    <div className="metric-card">
+                      <small>Mood tag</small>
+                      <strong>{draw.fortune.moodTag}</strong>
+                    </div>
+                  </div>
+
+                  <div className="action-group">
+                    <button type="button" className="secondary-button" onClick={handleShare}>
+                      Share result
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button accent"
+                      onClick={handleUnlockDeepReading}
+                      disabled={
+                        deepUnlocked ||
+                        isSwitchingChain ||
+                        isSendingPayment ||
+                        isConfirmingPayment ||
+                        !paymentEnabled
+                      }
+                    >
+                      {unlockButtonLabel}
+                    </button>
+                  </div>
+
+                  {!paymentEnabled ? (
+                    <p className="support-copy">Set NEXT_PUBLIC_USDC_RECEIVER to enable the paid unlock flow.</p>
+                  ) : null}
+
+                  {paymentHash ? (
+                    <p className="support-copy">
+                      Transaction submitted. <a href={toBaseScanTxUrl(paymentHash)} target="_blank" rel="noreferrer">View on BaseScan</a>
+                    </p>
+                  ) : null}
+
+                  {deepUnlocked ? (
+                    <section className="deep-card">
+                      <h4 className="deep-title">Deep reading</h4>
+                      <ul className="deep-list">
+                        <li>Opportunity: Start one meaningful conversation early today.</li>
+                        <li>Watch out: Do not rush decisions before checking context.</li>
+                        <li>Relationships: A kind message improves trust faster than silence.</li>
+                        <li>Action: Give tonight ten minutes to plan your next move with calm intent.</li>
+                      </ul>
+                      <p className="tiny-note">Onchain payment confirmed on Base.</p>
+                    </section>
+                  ) : null}
+                </>
+              ) : (
+                <p className="empty-copy">Pick a category and tap the button to load your reading.</p>
+              )}
+            </section>
+          </>
+        ) : null}
+
+        {activeTab === "history" ? (
+          <section className="panel-card tab-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-eyebrow">Recent cards</p>
+                <h3 className="panel-title">History</h3>
+              </div>
+              <span className="panel-meta">{history.length} saved</span>
+            </div>
+
+            {history.length > 0 ? (
+              <div className="history-list">
+                {history.map((item) => (
+                  <article key={item.drawId} className="history-item">
+                    <div>
+                      <p className="history-label">{item.categoryLabel}</p>
+                      <h4>{item.headline}</h4>
+                      <p>{formatDisplayDate(item.dateKey)}</p>
+                    </div>
+                    <span className="history-number">#{item.luckyNumber}</span>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="empty-copy">Your recent cards will appear here after you check a few fortunes.</p>
+            )}
+          </section>
+        ) : null}
+
+        {activeTab === "profile" ? (
+          <section className="panel-card tab-panel profile-panel">
+            <div className="panel-head">
+              <div>
+                <p className="section-eyebrow">Profile and settings</p>
+                <h3 className="panel-title">Your Base setup</h3>
+              </div>
+              <span className="panel-meta">{theme} mode</span>
+            </div>
+
+            <div className="profile-summary">
+              <div className="avatar-shell large">
+                {profile.avatarUrl ? (
+                  <img src={profile.avatarUrl} alt={profile.name} className="avatar-image" />
+                ) : (
+                  <span>{getInitials(profile.name)}</span>
+                )}
+              </div>
+              <div>
+                <p className="profile-name">{profile.name}</p>
+                <p className="profile-username">{profile.username}</p>
+                <p className="support-copy">Wallet status: {isConnected ? "Connected on Base" : "Not connected"}</p>
+              </div>
+            </div>
+
+            <div className="settings-grid">
+              <button type="button" className="settings-card" onClick={handleThemeToggle}>
+                <span>Theme</span>
+                <strong>Switch to {theme === "light" ? "dark" : "light"}</strong>
+              </button>
+              <button
+                type="button"
+                className="settings-card"
+                onClick={() => {
+                  setShowOnboarding(true);
+                  setOnboardingIndex(0);
+                }}
+              >
+                <span>Onboarding</span>
+                <strong>Show intro again</strong>
+              </button>
+            </div>
+
+            <div className="callout-card">
+              <h4>Featured checklist progress</h4>
+              <ul className="checklist-list">
+                <li>Bottom navigation and centered CTAs are in place.</li>
+                <li>Light and dark mode are both supported.</li>
+                <li>Wallet can auto-connect inside supported mini app clients.</li>
+                <li>Sponsored transactions still need backend or paymaster setup.</li>
+              </ul>
+            </div>
+          </section>
+        ) : null}
+      </div>
+
+      {showOnboarding ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+            <p className="section-eyebrow">{currentStep.eyebrow}</p>
+            <h2 id="onboarding-title" className="modal-title">{currentStep.title}</h2>
+            <p className="modal-body">{currentStep.description}</p>
+
+            <div className="step-indicators" aria-hidden>
+              {ONBOARDING_STEPS.map((_, index) => (
+                <span key={index} className={index === onboardingIndex ? "step-dot active" : "step-dot"} />
+              ))}
+            </div>
+
+            <div className="modal-actions">
+              <button type="button" className="secondary-button" onClick={handleCloseOnboarding}>
+                Skip
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => {
+                  if (onboardingIndex === ONBOARDING_STEPS.length - 1) {
+                    handleCloseOnboarding();
+                    return;
+                  }
+                  setOnboardingIndex((current) => current + 1);
+                }}
+              >
+                {onboardingIndex === ONBOARDING_STEPS.length - 1 ? "Start" : "Next"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {notice ? <div className="toast">{notice}</div> : null}
     </main>
