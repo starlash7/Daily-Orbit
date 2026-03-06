@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { getPaymentStatus, pay } from "@base-org/account";
 import { sdk } from "@farcaster/miniapp-sdk";
 import { base } from "wagmi/chains";
 import {
@@ -171,6 +172,9 @@ export default function HomePage(): React.JSX.Element {
   const [onboardingIndex, setOnboardingIndex] = useState<number>(0);
   const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
   const [autoConnectTried, setAutoConnectTried] = useState<boolean>(false);
+  const [isInsideMiniApp, setIsInsideMiniApp] = useState<boolean>(false);
+  const [paymentRequestId, setPaymentRequestId] = useState<string>("");
+  const [isLaunchingSponsoredPayment, setIsLaunchingSponsoredPayment] = useState<boolean>(false);
 
   const { address, chainId, isConnected } = useAccount();
   const { connectAsync, connectors, isPending: isConnecting } = useConnect();
@@ -234,6 +238,7 @@ export default function HomePage(): React.JSX.Element {
         setDraw(result);
         setDeepUnlocked(false);
         setPaymentHash(undefined);
+        setPaymentRequestId("");
         updateStreak(result.dateKey);
         updateHistory({
           drawId: result.drawId,
@@ -281,6 +286,8 @@ export default function HomePage(): React.JSX.Element {
 
     void sdk.actions.ready().catch(() => undefined);
 
+    void sdk.isInMiniApp().then(setIsInsideMiniApp).catch(() => setIsInsideMiniApp(false));
+
     void sdk.context
       .then((context: MiniAppContext) => {
         const user = context?.user ?? {};
@@ -319,7 +326,7 @@ export default function HomePage(): React.JSX.Element {
   useEffect(() => {
     if (isPaymentSuccess) {
       setDeepUnlocked(true);
-      setNotice("Payment confirmed. Deep reading unlocked.");
+      setNotice("Payment confirmed on Base. Deep reading unlocked.");
     }
   }, [isPaymentSuccess]);
 
@@ -327,6 +334,63 @@ export default function HomePage(): React.JSX.Element {
     if (!paymentReceiptError) return;
     setError(getUserFriendlyError(paymentReceiptError.message));
   }, [paymentReceiptError]);
+
+  useEffect(() => {
+    if (!paymentRequestId || deepUnlocked) return undefined;
+
+    let cancelled = false;
+    let checks = 0;
+
+    const pollPaymentStatus = async (): Promise<void> => {
+      checks += 1;
+
+      try {
+        const status = await getPaymentStatus({
+          id: paymentRequestId,
+          telemetry: false
+        });
+
+        if (cancelled) return;
+
+        if (status.status === "completed") {
+          setDeepUnlocked(true);
+          setPaymentRequestId("");
+          setNotice("Sponsored payment confirmed. Deep reading unlocked.");
+          return;
+        }
+
+        if (status.status === "failed") {
+          setPaymentRequestId("");
+          setError(status.reason || "Sponsored payment failed. Please try again.");
+          return;
+        }
+
+        if (status.status === "not_found" && checks >= 5) {
+          setPaymentRequestId("");
+          setError("We could not verify the sponsored payment yet. Please try again.");
+        }
+      } catch (statusError) {
+        if (cancelled) return;
+
+        setPaymentRequestId("");
+        setError(
+          statusError instanceof Error
+            ? getUserFriendlyError(statusError.message)
+            : "Unable to confirm the sponsored payment."
+        );
+      }
+    };
+
+    void pollPaymentStatus();
+    const interval = window.setInterval(() => {
+      void pollPaymentStatus();
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [deepUnlocked, paymentRequestId]);
 
   useEffect(() => {
     if (autoConnectTried || isConnected || connectors.length === 0) return;
@@ -424,15 +488,11 @@ export default function HomePage(): React.JSX.Element {
     setNotice("Wallet disconnected.");
     setDeepUnlocked(false);
     setPaymentHash(undefined);
+    setPaymentRequestId("");
   }, [disconnect]);
 
   const handleUnlockDeepReading = useCallback(async () => {
     if (deepUnlocked) return;
-
-    if (!isConnected) {
-      setNotice("Connect your wallet first.");
-      return;
-    }
 
     if (!hasRecipient) {
       setError("Payment recipient is not configured. Set NEXT_PUBLIC_USDC_RECEIVER.");
@@ -442,6 +502,25 @@ export default function HomePage(): React.JSX.Element {
     setError("");
 
     try {
+      if (isInsideMiniApp) {
+        setIsLaunchingSponsoredPayment(true);
+
+        const payment = await pay({
+          amount: deepReadingPriceLabel,
+          to: paymentRecipient,
+          telemetry: false
+        });
+
+        setPaymentRequestId(payment.id);
+        setNotice("Base Pay opened. Confirm the sponsored payment to unlock.");
+        return;
+      }
+
+      if (!isConnected) {
+        setNotice("Connect your wallet first.");
+        return;
+      }
+
       if (chainId !== base.id) {
         await switchChainAsync({ chainId: base.id });
       }
@@ -462,13 +541,17 @@ export default function HomePage(): React.JSX.Element {
           ? getUserFriendlyError(paymentError.message)
           : "Payment failed."
       );
+    } finally {
+      setIsLaunchingSponsoredPayment(false);
     }
   }, [
     chainId,
     deepReadingPriceUnits,
+    deepReadingPriceLabel,
     deepUnlocked,
     hasRecipient,
     isConnected,
+    isInsideMiniApp,
     paymentRecipient,
     switchChainAsync,
     writeContractAsync
@@ -495,11 +578,17 @@ export default function HomePage(): React.JSX.Element {
 
   const unlockButtonLabel = deepUnlocked
     ? "Deep reading unlocked"
+    : isLaunchingSponsoredPayment
+      ? "Opening Base Pay..."
     : isSwitchingChain
       ? "Switching to Base..."
-      : isSendingPayment || isConfirmingPayment
-        ? "Confirming payment..."
-        : `Unlock deep reading (${deepReadingPriceLabel} USDC)`;
+      : paymentRequestId || isSendingPayment || isConfirmingPayment
+        ? isInsideMiniApp
+          ? "Waiting for sponsored payment..."
+          : "Confirming payment..."
+        : isInsideMiniApp
+          ? `Unlock with Base Pay (${deepReadingPriceLabel} USDC)`
+          : `Unlock deep reading (${deepReadingPriceLabel} USDC)`;
 
   const paymentEnabled = hasRecipient;
   const currentStep = ONBOARDING_STEPS[onboardingIndex];
@@ -668,7 +757,9 @@ export default function HomePage(): React.JSX.Element {
                       onClick={handleUnlockDeepReading}
                       disabled={
                         deepUnlocked ||
+                        isLaunchingSponsoredPayment ||
                         isSwitchingChain ||
+                        Boolean(paymentRequestId) ||
                         isSendingPayment ||
                         isConfirmingPayment ||
                         !paymentEnabled
@@ -680,12 +771,18 @@ export default function HomePage(): React.JSX.Element {
 
                   {!paymentEnabled ? (
                     <p className="support-copy">Set NEXT_PUBLIC_USDC_RECEIVER to enable the paid unlock flow.</p>
+                  ) : isInsideMiniApp ? (
+                    <p className="support-copy">Inside Base mini app, unlocks use Base Pay for a sponsored checkout flow.</p>
                   ) : null}
 
                   {paymentHash ? (
                     <p className="support-copy">
                       Transaction submitted. <a href={toBaseScanTxUrl(paymentHash)} target="_blank" rel="noreferrer">View on BaseScan</a>
                     </p>
+                  ) : null}
+
+                  {paymentRequestId ? (
+                    <p className="support-copy">Waiting for Base Pay confirmation. This usually takes a few seconds.</p>
                   ) : null}
 
                   {deepUnlocked ? (
@@ -783,12 +880,12 @@ export default function HomePage(): React.JSX.Element {
             <div className="callout-card">
               <h4>Featured checklist progress</h4>
               <ul className="checklist-list">
-                <li>Bottom navigation and centered CTAs are in place.</li>
-                <li>Light and dark mode are both supported.</li>
-                <li>Wallet can auto-connect inside supported mini app clients.</li>
-                <li>Sponsored transactions still need backend or paymaster setup.</li>
-              </ul>
-            </div>
+                        <li>Bottom navigation and centered CTAs are in place.</li>
+                        <li>Light and dark mode are both supported.</li>
+                        <li>Wallet can auto-connect inside supported mini app clients.</li>
+                        <li>Deep reading now uses Base Pay inside mini app for a sponsored checkout flow.</li>
+                      </ul>
+                    </div>
           </section>
         ) : null}
       </div>
