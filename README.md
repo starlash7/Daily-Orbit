@@ -27,7 +27,7 @@ Copy `.env.example` to `.env.local` and set values.
 - `NEXT_PUBLIC_URL`: app base URL
 - `NEXT_PUBLIC_BASE_RPC_URL`: Base RPC endpoint (default: `https://mainnet.base.org`)
 - `NEXT_PUBLIC_USDC_RECEIVER`: recipient wallet for USDC unlock payments
-- `NEXT_PUBLIC_DEEP_READING_PRICE_USDC`: unlock amount (default: `0.5`)
+- `NEXT_PUBLIC_DEEP_READING_PRICE_USDC`: unlock amount (default: `0.1`)
 - `FARCASTER_HEADER`
 - `FARCASTER_PAYLOAD`
 - `FARCASTER_SIGNATURE`
