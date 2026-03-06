@@ -36,6 +36,20 @@ Manifest check:
 
 - `http://localhost:3000/.well-known/farcaster.json`
 
+## Production setup (Vercel)
+
+Set these env vars in Vercel before enabling paid unlock in production:
+
+- `NEXT_PUBLIC_URL`
+- `NEXT_PUBLIC_BASE_RPC_URL`
+- `NEXT_PUBLIC_USDC_RECEIVER` (required for live USDC transfer)
+- `NEXT_PUBLIC_DEEP_READING_PRICE_USDC`
+- `FARCASTER_HEADER`
+- `FARCASTER_PAYLOAD`
+- `FARCASTER_SIGNATURE`
+
+Without `NEXT_PUBLIC_USDC_RECEIVER`, the unlock button is intentionally disabled.
+
 ## 코드 구조
 
 | 경로 | 설명 |
