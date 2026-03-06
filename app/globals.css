@@ -63,6 +63,10 @@ button {
   gap: 10px;
 }
 
+.app-title-block {
+  min-width: 0;
+}
+
 .app-kicker {
   margin: 0;
   font-size: 11px;
@@ -87,6 +91,41 @@ button {
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.wallet-panel {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.wallet-address {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wallet-button {
+  border: 1px solid #cfe0ff;
+  background: #edf3ff;
+  color: #23439f;
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wallet-button.secondary {
+  border-color: var(--line);
+  background: #fff;
+  color: #425172;
+}
+
+.wallet-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .insight-hero {
@@ -120,8 +159,14 @@ button {
   opacity: 0.92;
 }
 
+.insight-streak {
+  margin: 8px 0 0;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
 .insight-date {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   font-size: 12px;
   opacity: 0.84;
 }
@@ -275,6 +320,28 @@ button {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.tertiary-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.config-warning {
+  margin: 10px 0 0;
+  color: #9a6b22;
+  font-size: 12px;
+}
+
+.tx-line {
+  margin: 8px 0 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.tx-line a {
+  color: #2b4baa;
+  text-decoration: underline;
 }
 
 .deep-card {

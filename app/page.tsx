@@ -1,7 +1,25 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { base } from "wagmi/chains";
+import {
+  useAccount,
+  useConnect,
+  useDisconnect,
+  useSwitchChain,
+  useWaitForTransactionReceipt,
+  useWriteContract
+} from "wagmi";
+import { erc20Abi } from "viem";
 
+import {
+  BASE_USDC_ADDRESS,
+  getDeepReadingPriceLabel,
+  getDeepReadingPriceUnits,
+  getPaymentRecipient,
+  hasValidPaymentRecipient,
+  toBaseScanTxUrl
+} from "@/lib/payments";
 import type { FortuneCategory } from "@/lib/fortune";
 
 type DrawResponse = {
@@ -41,9 +59,21 @@ function toDateKey(date: Date): string {
 }
 
 function toPreviousDateKey(todayKey: string): string {
-  const base = new Date(`${todayKey}T00:00:00`);
-  base.setDate(base.getDate() - 1);
-  return toDateKey(base);
+  const baseDate = new Date(`${todayKey}T00:00:00`);
+  baseDate.setDate(baseDate.getDate() - 1);
+  return toDateKey(baseDate);
+}
+
+function shortenAddress(address?: string): string {
+  if (!address) return "Not connected";
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+function getUserFriendlyError(message: string): string {
+  if (message.includes("User rejected")) return "Transaction was rejected in wallet.";
+  if (message.includes("insufficient funds")) return "Insufficient balance for this transaction.";
+  if (message.includes("connector")) return "Wallet connection failed. Please reconnect.";
+  return "Payment failed. Please try again.";
 }
 
 export default function HomePage(): React.JSX.Element {
@@ -54,6 +84,30 @@ export default function HomePage(): React.JSX.Element {
   const [streak, setStreak] = useState<number>(0);
   const [deepUnlocked, setDeepUnlocked] = useState<boolean>(false);
   const [notice, setNotice] = useState<string>("");
+  const [paymentHash, setPaymentHash] = useState<`0x${string}` | undefined>(undefined);
+
+  const { address, chainId, isConnected } = useAccount();
+  const { connectAsync, connectors, isPending: isConnecting } = useConnect();
+  const { disconnect } = useDisconnect();
+  const { switchChainAsync, isPending: isSwitchingChain } = useSwitchChain();
+  const { writeContractAsync, isPending: isSendingPayment } = useWriteContract();
+
+  const {
+    isLoading: isConfirmingPayment,
+    isSuccess: isPaymentSuccess,
+    error: paymentReceiptError
+  } = useWaitForTransactionReceipt({
+    chainId: base.id,
+    hash: paymentHash,
+    query: {
+      enabled: Boolean(paymentHash)
+    }
+  });
+
+  const paymentRecipient = getPaymentRecipient();
+  const hasRecipient = hasValidPaymentRecipient();
+  const deepReadingPriceLabel = getDeepReadingPriceLabel();
+  const deepReadingPriceUnits = getDeepReadingPriceUnits();
 
   const updateStreak = useCallback((dateKey: string) => {
     const streakDateKey = "daily-orbit:last-draw-date";
@@ -76,12 +130,13 @@ export default function HomePage(): React.JSX.Element {
   }, []);
 
   const fetchDraw = useCallback(
-    async (category: FortuneCategory) => {
+    async (category: FortuneCategory, walletAddress?: string) => {
       setLoading(true);
       setError("");
 
       try {
-        const response = await fetch(`/api/draw?category=${category}`);
+        const walletQuery = walletAddress ? `&wallet=${walletAddress}` : "";
+        const response = await fetch(`/api/draw?category=${category}${walletQuery}`);
         if (!response.ok) {
           throw new Error("Could not load your fortune right now. Please try again.");
         }
@@ -89,6 +144,7 @@ export default function HomePage(): React.JSX.Element {
         const result = (await response.json()) as DrawResponse;
         setDraw(result);
         setDeepUnlocked(false);
+        setPaymentHash(undefined);
         updateStreak(result.dateKey);
       } catch (drawError) {
         setError(
@@ -108,14 +164,26 @@ export default function HomePage(): React.JSX.Element {
     if (Number.isFinite(stored)) {
       setStreak(stored);
     }
-    fetchDraw("love").catch(() => undefined);
-  }, [fetchDraw]);
+    fetchDraw("love", address).catch(() => undefined);
+  }, [address, fetchDraw]);
 
   useEffect(() => {
     if (!notice) return undefined;
     const timer = window.setTimeout(() => setNotice(""), 1800);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    if (isPaymentSuccess) {
+      setDeepUnlocked(true);
+      setNotice("Payment confirmed. Deep reading unlocked.");
+    }
+  }, [isPaymentSuccess]);
+
+  useEffect(() => {
+    if (!paymentReceiptError) return;
+    setError(getUserFriendlyError(paymentReceiptError.message));
+  }, [paymentReceiptError]);
 
   const shareText = useMemo(() => {
     if (!draw) return "";
@@ -150,12 +218,101 @@ export default function HomePage(): React.JSX.Element {
     }
   }, [draw, shareText]);
 
+  const handleConnectWallet = useCallback(async () => {
+    setError("");
+    try {
+      const coinbaseConnector =
+        connectors.find((connector) =>
+          connector.name.toLowerCase().includes("coinbase")
+        ) ?? connectors[0];
+
+      if (!coinbaseConnector) {
+        setError("No wallet connector is available.");
+        return;
+      }
+
+      await connectAsync({ connector: coinbaseConnector });
+      setNotice("Wallet connected.");
+    } catch (connectError) {
+      setError(
+        connectError instanceof Error
+          ? getUserFriendlyError(connectError.message)
+          : "Wallet connection failed."
+      );
+    }
+  }, [connectAsync, connectors]);
+
+  const handleDisconnectWallet = useCallback(() => {
+    disconnect();
+    setNotice("Wallet disconnected.");
+    setDeepUnlocked(false);
+    setPaymentHash(undefined);
+  }, [disconnect]);
+
+  const handleUnlockDeepReading = useCallback(async () => {
+    if (deepUnlocked) {
+      return;
+    }
+
+    if (!isConnected) {
+      setNotice("Connect your wallet first.");
+      return;
+    }
+
+    if (!hasRecipient) {
+      setError("Payment recipient is not configured. Set NEXT_PUBLIC_USDC_RECEIVER.");
+      return;
+    }
+
+    setError("");
+
+    try {
+      if (chainId !== base.id) {
+        await switchChainAsync({ chainId: base.id });
+      }
+
+      const txHash = await writeContractAsync({
+        address: BASE_USDC_ADDRESS,
+        abi: erc20Abi,
+        functionName: "transfer",
+        args: [paymentRecipient as `0x${string}`, deepReadingPriceUnits],
+        chainId: base.id
+      });
+
+      setPaymentHash(txHash);
+      setNotice("Transaction submitted.");
+    } catch (paymentError) {
+      setError(
+        paymentError instanceof Error
+          ? getUserFriendlyError(paymentError.message)
+          : "Payment failed."
+      );
+    }
+  }, [
+    chainId,
+    deepReadingPriceUnits,
+    deepUnlocked,
+    hasRecipient,
+    isConnected,
+    paymentRecipient,
+    switchChainAsync,
+    writeContractAsync
+  ]);
+
   const displayDate = draw ? formatDisplayDate(draw.dateKey) : formatDisplayDate(toDateKey(new Date()));
   const selectedLabel = useMemo(
     () => CATEGORIES.find((item) => item.key === selectedCategory)?.label ?? "Love",
     [selectedCategory]
   );
   const heroHeadline = draw?.fortune.headline ?? "Check your daily flow in under a minute.";
+
+  const unlockButtonLabel = deepUnlocked
+    ? "Deep reading unlocked"
+    : isSwitchingChain
+      ? "Switching to Base..."
+      : isSendingPayment || isConfirmingPayment
+        ? "Confirming payment..."
+        : `Unlock deep reading (${deepReadingPriceLabel} USDC)`;
 
   return (
     <main className="premium-root">
@@ -165,13 +322,31 @@ export default function HomePage(): React.JSX.Element {
             <p className="app-kicker">Daily Orbit</p>
             <h1 className="app-title">Daily Fortune</h1>
           </div>
-          <div className="streak-token">Streak {streak}d</div>
+
+          <div className="wallet-panel">
+            <p className="wallet-address">{shortenAddress(address)}</p>
+            {isConnected ? (
+              <button type="button" className="wallet-button secondary" onClick={handleDisconnectWallet}>
+                Disconnect
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="wallet-button"
+                onClick={handleConnectWallet}
+                disabled={isConnecting}
+              >
+                {isConnecting ? "Connecting..." : "Connect Base"}
+              </button>
+            )}
+          </div>
         </header>
 
         <section className="insight-hero" aria-label="today insight">
           <p className="insight-kicker">Today&apos;s insight</p>
           <p className="insight-main">{heroHeadline}</p>
           <p className="insight-sub">A focused one-line read, then your next action.</p>
+          <p className="insight-streak">Current streak: {streak} days</p>
           <p className="insight-date">{displayDate}</p>
         </section>
 
@@ -199,7 +374,7 @@ export default function HomePage(): React.JSX.Element {
             type="button"
             className="primary-action"
             disabled={loading}
-            onClick={() => fetchDraw(selectedCategory)}
+            onClick={() => fetchDraw(selectedCategory, address)}
           >
             {loading ? "Loading your fortune..." : "Check today's fortune"}
           </button>
@@ -240,14 +415,32 @@ export default function HomePage(): React.JSX.Element {
                 <button type="button" className="tertiary-action" onClick={handleShare}>
                   Share result
                 </button>
+
                 <button
                   type="button"
                   className="tertiary-action"
-                  onClick={() => setDeepUnlocked((prev) => !prev)}
+                  onClick={handleUnlockDeepReading}
+                  disabled={
+                    deepUnlocked ||
+                    isSwitchingChain ||
+                    isSendingPayment ||
+                    isConfirmingPayment ||
+                    !hasRecipient
+                  }
                 >
-                  Unlock deep reading (0.5 USDC demo)
+                  {unlockButtonLabel}
                 </button>
               </div>
+
+              {!hasRecipient ? (
+                <p className="config-warning">Set NEXT_PUBLIC_USDC_RECEIVER to enable onchain unlock.</p>
+              ) : null}
+
+              {paymentHash ? (
+                <p className="tx-line">
+                  Transaction submitted. <a href={toBaseScanTxUrl(paymentHash)} target="_blank" rel="noreferrer">View on BaseScan</a>
+                </p>
+              ) : null}
             </>
           ) : (
             <p className="empty-copy">Pick a category and tap the button to load your reading.</p>
@@ -262,9 +455,7 @@ export default function HomePage(): React.JSX.Element {
                 <li>Relationships: A clear and kind message can improve trust.</li>
                 <li>Action: Spend ten minutes outlining your next step tonight.</li>
               </ul>
-              <p className="tiny-note">
-                This is currently a payment UX demo before live onchain settlement.
-              </p>
+              <p className="tiny-note">Onchain payment confirmed on Base.</p>
             </section>
           ) : null}
         </section>

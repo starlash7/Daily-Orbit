@@ -1,34 +1,38 @@
 # Daily Orbit
 
-Base Mini App 환경에서 매일 1분 운세를 확인하고 공유하는 초경량 소셜 운세 앱 기획 문서 모음입니다.
+Daily Orbit is a Base Mini App concept for fast daily fortune checks with shareable cards and optional onchain unlock.
 
-## 현재 구현 상태
+## Current implementation
 
-- Next.js 기반 MVP 스캐폴딩 완료
-- `/api/draw` 일일 운세 API 구현
-- `/.well-known/farcaster.json` 라우트 구현
-- 결과 공유/심화 해석(데모) UI 구현
-- Mini App용 SVG 에셋(`public/miniapp`) 추가
+- Next.js app with mobile-first premium UI
+- `/api/draw` daily fortune API
+- `/.well-known/farcaster.json` Mini App manifest route
+- Wallet connect (Base) + onchain USDC transfer flow for deep reading unlock
+- Fortune content pool expanded to 50 per category (200 total)
+- Mini App SVG assets in `public/miniapp`
 
-## 로컬 실행
+## Local run
 
 ```bash
 npm install
 npm run dev
 ```
 
-기본 주소: `http://localhost:3000`
+Default URL: `http://localhost:3000`
 
-## 환경 변수
+## Environment variables
 
-`.env.example`를 참고해 `.env.local`을 설정하세요.
+Copy `.env.example` to `.env.local` and set values.
 
-- `NEXT_PUBLIC_URL`: 앱 절대 URL
+- `NEXT_PUBLIC_URL`: app base URL
+- `NEXT_PUBLIC_BASE_RPC_URL`: Base RPC endpoint (default: `https://mainnet.base.org`)
+- `NEXT_PUBLIC_USDC_RECEIVER`: recipient wallet for USDC unlock payments
+- `NEXT_PUBLIC_DEEP_READING_PRICE_USDC`: unlock amount (default: `0.5`)
 - `FARCASTER_HEADER`
 - `FARCASTER_PAYLOAD`
 - `FARCASTER_SIGNATURE`
 
-Mini App manifest 확인:
+Manifest check:
 
 - `http://localhost:3000/.well-known/farcaster.json`
 
@@ -40,6 +44,8 @@ Mini App manifest 확인:
 | `app/api/draw/route.ts` | 카테고리 기반 운세 결과 API |
 | `app/.well-known/farcaster.json/route.ts` | Farcaster Mini App manifest |
 | `lib/fortune.ts` | 운세 데이터/일일 deterministic draw 로직 |
+| `lib/payments.ts` | Base USDC 결제 상수/설정 유틸 |
+| `lib/wagmi.ts` | Base 체인 wallet connector 설정 |
 | `public/miniapp/*` | icon/og/splash SVG 에셋 |
 
 ## 프로젝트 한 줄 요약
