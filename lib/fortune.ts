@@ -9,107 +9,193 @@ export type Fortune = {
 };
 
 const CATEGORY_LABELS: Record<FortuneCategory, string> = {
-  love: "연애",
-  money: "금전",
-  career: "커리어",
-  health: "건강"
+  love: "Love",
+  money: "Money",
+  career: "Career",
+  health: "Health"
 };
 
-const FORTUNE_POOL: Record<FortuneCategory, Fortune[]> = {
-  love: [
-    {
-      headline: "조용한 대화가 관계를 부드럽게 만들어요.",
-      detail: "오늘은 빠른 결론보다 상대의 말을 끝까지 듣는 태도가 호감으로 이어집니다.",
-      luckyColor: "Rose Dust",
-      luckyNumber: 6,
-      moodTag: "soft"
-    },
-    {
-      headline: "가벼운 칭찬 한마디가 분위기를 바꿔요.",
-      detail: "부담 없는 응원 메시지가 생각보다 큰 신뢰를 만듭니다.",
-      luckyColor: "Moon Glow",
-      luckyNumber: 18,
-      moodTag: "warm"
-    },
-    {
-      headline: "조급함을 놓으면 더 정확한 마음이 보여요.",
-      detail: "답을 재촉하기보다 오늘의 감정을 정리하면 오해를 줄일 수 있습니다.",
-      luckyColor: "Mystic Blue",
-      luckyNumber: 27,
-      moodTag: "calm"
-    }
-  ],
-  money: [
-    {
-      headline: "작은 절약이 오늘의 안정감을 만들어요.",
-      detail: "구독/소액 지출 하나만 정리해도 이번 주 소비 흐름이 개선됩니다.",
-      luckyColor: "Lucky Mint",
-      luckyNumber: 4,
-      moodTag: "steady"
-    },
-    {
-      headline: "충동구매보다 비교가 이득을 줘요.",
-      detail: "가격을 한 번만 더 확인해도 만족도가 크게 높아질 가능성이 큽니다.",
-      luckyColor: "Moon Glow",
-      luckyNumber: 13,
-      moodTag: "smart"
-    },
-    {
-      headline: "계획한 범위 안에서 충분히 즐길 수 있어요.",
-      detail: "예산을 정해두면 지출 후 후회가 줄고 선택이 훨씬 명확해집니다.",
-      luckyColor: "Primary Night",
-      luckyNumber: 21,
-      moodTag: "balanced"
-    }
-  ],
-  career: [
-    {
-      headline: "우선순위 1개만 정해도 성과가 보입니다.",
-      detail: "할 일을 줄여 집중하면 체감 진척이 커지고 피로감은 줄어듭니다.",
-      luckyColor: "Mystic Blue",
-      luckyNumber: 8,
-      moodTag: "focus"
-    },
-    {
-      headline: "짧은 공유가 팀의 속도를 높여요.",
-      detail: "완벽한 문서보다 현재 상태를 빠르게 공유하는 것이 오늘은 더 효과적입니다.",
-      luckyColor: "Lucky Mint",
-      luckyNumber: 16,
-      moodTag: "team"
-    },
-    {
-      headline: "미뤄둔 작은 작업 하나가 흐름을 엽니다.",
-      detail: "가벼운 태스크를 먼저 끝내면 큰 작업에 진입하는 진입장벽이 낮아집니다.",
-      luckyColor: "Moon Glow",
-      luckyNumber: 25,
-      moodTag: "momentum"
-    }
-  ],
-  health: [
-    {
-      headline: "오늘은 속도보다 리듬이 중요해요.",
-      detail: "짧은 스트레칭과 수분 보충만 지켜도 컨디션이 안정될 가능성이 높습니다.",
-      luckyColor: "Lucky Mint",
-      luckyNumber: 2,
-      moodTag: "refresh"
-    },
-    {
-      headline: "수면 루틴을 30분만 앞당겨 보세요.",
-      detail: "내일의 집중력이 달라지는 변화를 체감할 수 있습니다.",
-      luckyColor: "Primary Night",
-      luckyNumber: 11,
-      moodTag: "recover"
-    },
-    {
-      headline: "무리한 계획보다 꾸준한 작은 습관이 유리해요.",
-      detail: "오늘 가능한 수준의 목표를 지키는 것이 장기적으로 더 큰 성과를 냅니다.",
-      luckyColor: "Rose Dust",
-      luckyNumber: 20,
-      moodTag: "gentle"
-    }
-  ]
+const LUCKY_COLORS = [
+  "Moonlight Blue",
+  "Rose Quartz",
+  "Mint Aura",
+  "Starlight Silver",
+  "Sunrise Gold",
+  "Midnight Indigo",
+  "Cloud White",
+  "Aurora Teal"
+];
+
+const MOOD_TAGS = [
+  "calm",
+  "spark",
+  "focused",
+  "steady",
+  "bold",
+  "gentle",
+  "clear",
+  "uplift",
+  "grounded",
+  "flow"
+];
+
+const HEADLINE_SUFFIXES = [
+  "for today.",
+  "in your next move.",
+  "before the day ends.",
+  "in small moments.",
+  "when you stay intentional."
+];
+
+type CategoryTemplate = {
+  baseHeadlines: string[];
+  insightSeeds: string[];
+  actionSeeds: string[];
 };
 
+const CATEGORY_TEMPLATES: Record<FortuneCategory, CategoryTemplate> = {
+  love: {
+    baseHeadlines: [
+      "A calm conversation opens the right door",
+      "Soft honesty creates stronger chemistry",
+      "Patience makes your feelings easier to read",
+      "A small compliment shifts the whole mood",
+      "Warmth speaks louder than perfect timing",
+      "Listening deeply brings unexpected closeness",
+      "Simple gestures carry real meaning",
+      "Clear boundaries protect your peace",
+      "A gentle check-in can change your day",
+      "Trust grows through consistent attention"
+    ],
+    insightSeeds: [
+      "People around you respond better to sincerity than speed.",
+      "One thoughtful message can reset a stale connection.",
+      "A slower pace helps you notice what matters most.",
+      "A little emotional clarity prevents unnecessary misunderstandings.",
+      "You gain more by asking than by assuming.",
+      "Kind words land best when they are specific and brief.",
+      "Your tone matters as much as your timing today.",
+      "Shared routines can feel surprisingly comforting right now.",
+      "A grounded response will strengthen trust.",
+      "When you stay present, connection follows naturally."
+    ],
+    actionSeeds: [
+      "Send one thoughtful message before noon.",
+      "Ask one genuine question and pause for the answer.",
+      "Choose clarity over mixed signals in your next chat.",
+      "Give one clear compliment without overexplaining.",
+      "End the day with a short, warm check-in."
+    ]
+  },
+  money: {
+    baseHeadlines: [
+      "Small discipline increases your financial calm",
+      "Comparison beats impulse today",
+      "A clear limit protects your flexibility",
+      "Practical choices unlock better value",
+      "Consistency matters more than intensity",
+      "A tiny adjustment can improve your whole week",
+      "Your budget works best when it stays visible",
+      "Intentional spending creates better confidence",
+      "A short review reveals hidden leaks",
+      "Simple planning gives you more freedom"
+    ],
+    insightSeeds: [
+      "Your best move is reducing one low-value expense.",
+      "A quick second check can prevent avoidable waste.",
+      "Spending feels easier when you pre-commit a limit.",
+      "Short-term comfort is less useful than long-term control.",
+      "You are likely to benefit from delaying one non-urgent purchase.",
+      "Keeping choices simple helps you stay on track.",
+      "Smaller transactions deserve the same attention as bigger ones.",
+      "A daily cap improves both confidence and clarity.",
+      "What you skip today creates options later.",
+      "Focused spending beats broad restriction."
+    ],
+    actionSeeds: [
+      "Review one subscription and remove what you do not use.",
+      "Wait ten minutes before any non-essential purchase.",
+      "Set a hard cap for discretionary spending today.",
+      "Track every small payment for one full day.",
+      "Move a tiny amount into savings before evening."
+    ]
+  },
+  career: {
+    baseHeadlines: [
+      "One clear priority unlocks momentum",
+      "Focused execution beats perfect planning",
+      "Short updates can move teams faster",
+      "A clean start beats a delayed start",
+      "Clarity creates better collaboration",
+      "Your consistency is your strongest signal",
+      "Smaller wins build bigger confidence",
+      "Intentional communication lowers friction",
+      "Progress accelerates when scope is narrow",
+      "The next step is simpler than it looks"
+    ],
+    insightSeeds: [
+      "Your highest-value task should be first, not later.",
+      "A concise status update can remove hidden blockers.",
+      "Reducing scope often improves output quality.",
+      "You gain speed by finishing before starting something new.",
+      "Clear asks make teamwork smoother today.",
+      "A quick draft now is better than a perfect draft tomorrow.",
+      "Focus windows are more important than total hours.",
+      "Direct communication saves revision cycles.",
+      "Closing one open loop will free up mental energy.",
+      "Steady progress wins over dramatic bursts."
+    ],
+    actionSeeds: [
+      "Define one must-finish task before checking messages.",
+      "Share a concise update with your team in two lines.",
+      "Block a 30-minute focus session with notifications off.",
+      "Close one overdue task before starting anything new.",
+      "Write your next step as a single sentence."
+    ]
+  },
+  health: {
+    baseHeadlines: [
+      "Rhythm supports your energy better than intensity",
+      "Gentle consistency lifts your baseline",
+      "Recovery is productive, not optional",
+      "Small habits shape bigger outcomes",
+      "A calmer pace improves your focus",
+      "Your body responds well to predictable routines",
+      "Hydration and sleep are your quiet advantage",
+      "Lower pressure creates better balance",
+      "Steady routines reduce hidden fatigue",
+      "Tiny resets can change your day"
+    ],
+    insightSeeds: [
+      "Your energy improves when basics come first.",
+      "A short reset is more useful than pushing through.",
+      "Stability today creates momentum tomorrow.",
+      "Lowering intensity can improve consistency.",
+      "Your focus depends on rest more than motivation.",
+      "A little movement can clear mental fog quickly.",
+      "Hydration timing matters as much as quantity.",
+      "A clean evening routine will improve tomorrow's start.",
+      "Steady breathing can reduce stress faster than expected.",
+      "You perform better when recovery is planned."
+    ],
+    actionSeeds: [
+      "Take a five-minute stretch break before lunch.",
+      "Drink water first, then caffeine.",
+      "Set a realistic sleep target and protect it.",
+      "Walk for ten minutes after your longest sitting block.",
+      "End the day with a short digital cooldown."
+    ]
+  }
+};
+
+const CATEGORY_OFFSETS: Record<FortuneCategory, number> = {
+  love: 3,
+  money: 11,
+  career: 19,
+  health: 27
+};
+
+const FORTUNES_PER_CATEGORY = 50;
 const FALLBACK_CATEGORY: FortuneCategory = "love";
 
 function hashString(input: string): number {
@@ -125,6 +211,40 @@ function getDateKey(date = new Date()): string {
   return date.toISOString().split("T")[0] ?? "1970-01-01";
 }
 
+function makeFortunes(category: FortuneCategory): Fortune[] {
+  const template = CATEGORY_TEMPLATES[category];
+  const offset = CATEGORY_OFFSETS[category];
+  const fortunes: Fortune[] = [];
+
+  for (let i = 0; i < FORTUNES_PER_CATEGORY; i += 1) {
+    const headlineIndex = Math.floor(i / template.actionSeeds.length);
+    const actionIndex = i % template.actionSeeds.length;
+    const insightIndex = Math.floor(i / template.actionSeeds.length);
+
+    const baseHeadline = template.baseHeadlines[headlineIndex] ?? template.baseHeadlines[0];
+    const suffix = HEADLINE_SUFFIXES[actionIndex] ?? HEADLINE_SUFFIXES[0];
+    const insight = template.insightSeeds[insightIndex] ?? template.insightSeeds[0];
+    const action = template.actionSeeds[actionIndex] ?? template.actionSeeds[0];
+
+    fortunes.push({
+      headline: `${baseHeadline} ${suffix}`,
+      detail: `${insight} ${action}`,
+      luckyColor: LUCKY_COLORS[(i + offset) % LUCKY_COLORS.length] ?? "Moonlight Blue",
+      luckyNumber: ((offset + i * 7) % 49) + 1,
+      moodTag: MOOD_TAGS[(i + offset) % MOOD_TAGS.length] ?? "calm"
+    });
+  }
+
+  return fortunes;
+}
+
+const FORTUNE_POOL: Record<FortuneCategory, Fortune[]> = {
+  love: makeFortunes("love"),
+  money: makeFortunes("money"),
+  career: makeFortunes("career"),
+  health: makeFortunes("health")
+};
+
 export function isFortuneCategory(value: string): value is FortuneCategory {
   return value === "love" || value === "money" || value === "career" || value === "health";
 }
@@ -135,6 +255,15 @@ export function getCategoryLabel(category: FortuneCategory): string {
 
 export function getSupportedCategories(): FortuneCategory[] {
   return Object.keys(CATEGORY_LABELS) as FortuneCategory[];
+}
+
+export function getFortuneCounts(): Record<FortuneCategory, number> {
+  return {
+    love: FORTUNE_POOL.love.length,
+    money: FORTUNE_POOL.money.length,
+    career: FORTUNE_POOL.career.length,
+    health: FORTUNE_POOL.health.length
+  };
 }
 
 export function drawDailyFortune(params: {

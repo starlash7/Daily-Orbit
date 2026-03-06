@@ -1,16 +1,22 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-function buildAppUrl(path = ""): string {
-  const baseUrl = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
+function normalizeBaseUrl(rawBaseUrl: string): string {
+  return rawBaseUrl.endsWith("/") ? rawBaseUrl.slice(0, -1) : rawBaseUrl;
+}
+
+function buildAppUrl(baseUrl: string, path = ""): string {
   const normalizedBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
   return `${normalizedBase}${path}`;
 }
 
-export function GET(): NextResponse {
-  const iconUrl = buildAppUrl("/miniapp/icon.svg");
-  const homeUrl = buildAppUrl("/");
-  const imageUrl = buildAppUrl("/miniapp/og.svg");
-  const splashImageUrl = buildAppUrl("/miniapp/splash.svg");
+export function GET(request: NextRequest): NextResponse {
+  const envBase = process.env.NEXT_PUBLIC_URL?.trim();
+  const baseUrl = envBase ? normalizeBaseUrl(envBase) : request.nextUrl.origin;
+
+  const iconUrl = buildAppUrl(baseUrl, "/miniapp/icon.svg");
+  const homeUrl = buildAppUrl(baseUrl, "/");
+  const imageUrl = buildAppUrl(baseUrl, "/miniapp/og.svg");
+  const splashImageUrl = buildAppUrl(baseUrl, "/miniapp/splash.svg");
 
   const manifest = {
     accountAssociation: {

@@ -18,17 +18,18 @@ type DrawResponse = {
   };
 };
 
-const CATEGORIES: Array<{ key: FortuneCategory; label: string }> = [
-  { key: "love", label: "연애" },
-  { key: "money", label: "금전" },
-  { key: "career", label: "커리어" },
-  { key: "health", label: "건강" }
+const CATEGORIES: Array<{ key: FortuneCategory; label: string; hint: string }> = [
+  { key: "love", label: "Love", hint: "Connection & feelings" },
+  { key: "money", label: "Money", hint: "Spending & choices" },
+  { key: "career", label: "Career", hint: "Work & progress" },
+  { key: "health", label: "Health", hint: "Energy & recovery" }
 ];
 
-function formatKoreanDate(input: string): string {
+function formatDisplayDate(input: string): string {
   const date = new Date(`${input}T00:00:00`);
   if (Number.isNaN(date.getTime())) return input;
-  return date.toLocaleDateString("ko-KR", {
+
+  return date.toLocaleDateString("en-US", {
     month: "long",
     day: "numeric",
     weekday: "short"
@@ -52,6 +53,7 @@ export default function HomePage(): React.JSX.Element {
   const [error, setError] = useState<string>("");
   const [streak, setStreak] = useState<number>(0);
   const [deepUnlocked, setDeepUnlocked] = useState<boolean>(false);
+  const [notice, setNotice] = useState<string>("");
 
   const updateStreak = useCallback((dateKey: string) => {
     const streakDateKey = "daily-orbit:last-draw-date";
@@ -73,36 +75,51 @@ export default function HomePage(): React.JSX.Element {
     setStreak(nextCount);
   }, []);
 
-  const fetchDraw = useCallback(async (category: FortuneCategory) => {
-    setLoading(true);
-    setError("");
+  const fetchDraw = useCallback(
+    async (category: FortuneCategory) => {
+      setLoading(true);
+      setError("");
 
-    try {
-      const response = await fetch(`/api/draw?category=${category}`);
-      if (!response.ok) throw new Error("운세를 불러오지 못했어요. 잠시 후 다시 시도해주세요.");
+      try {
+        const response = await fetch(`/api/draw?category=${category}`);
+        if (!response.ok) {
+          throw new Error("Could not load your fortune right now. Please try again.");
+        }
 
-      const result = (await response.json()) as DrawResponse;
-      setDraw(result);
-      setDeepUnlocked(false);
-      updateStreak(result.dateKey);
-    } catch (drawError) {
-      setError(drawError instanceof Error ? drawError.message : "알 수 없는 오류가 발생했습니다.");
-    } finally {
-      setLoading(false);
-    }
-  }, [updateStreak]);
+        const result = (await response.json()) as DrawResponse;
+        setDraw(result);
+        setDeepUnlocked(false);
+        updateStreak(result.dateKey);
+      } catch (drawError) {
+        setError(
+          drawError instanceof Error
+            ? drawError.message
+            : "Unexpected error. Please try one more time."
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [updateStreak]
+  );
 
   useEffect(() => {
     const stored = Number(localStorage.getItem("daily-orbit:streak-count") || "0");
     if (Number.isFinite(stored)) {
       setStreak(stored);
     }
-    fetchDraw(selectedCategory).catch(() => undefined);
-  }, [fetchDraw, selectedCategory]);
+    fetchDraw("love").catch(() => undefined);
+  }, [fetchDraw]);
+
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timer = window.setTimeout(() => setNotice(""), 1800);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   const shareText = useMemo(() => {
     if (!draw) return "";
-    return `Daily Orbit ${draw.categoryLabel} 운세: ${draw.fortune.headline} | 행운 숫자 ${draw.fortune.luckyNumber}`;
+    return `Daily Orbit ${draw.categoryLabel}: ${draw.fortune.headline} | Lucky number ${draw.fortune.luckyNumber}`;
   }, [draw]);
 
   const handleShare = useCallback(async () => {
@@ -114,113 +131,146 @@ export default function HomePage(): React.JSX.Element {
       url: window.location.href
     };
 
-    if (navigator.share) {
-      await navigator.share(payload);
-      return;
-    }
+    try {
+      if (navigator.share) {
+        await navigator.share(payload);
+        setNotice("Shared.");
+        return;
+      }
 
-    await navigator.clipboard.writeText(`${payload.text}\n${payload.url}`);
-    window.alert("결과가 클립보드에 복사되었어요.");
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(`${payload.text}\n${payload.url}`);
+        setNotice("Copied to clipboard.");
+        return;
+      }
+
+      setNotice("Sharing is not available on this device.");
+    } catch {
+      setNotice("Share canceled.");
+    }
   }, [draw, shareText]);
 
+  const displayDate = draw ? formatDisplayDate(draw.dateKey) : formatDisplayDate(toDateKey(new Date()));
+  const selectedLabel = useMemo(
+    () => CATEGORIES.find((item) => item.key === selectedCategory)?.label ?? "Love",
+    [selectedCategory]
+  );
+  const heroHeadline = draw?.fortune.headline ?? "Check your daily flow in under a minute.";
+
   return (
-    <main className="page-shell">
-      <div className="ambient-layer" aria-hidden />
-
-      <section className="hero card">
-        <p className="eyebrow">Base Mini App</p>
-        <h1>Daily Orbit</h1>
-        <p className="hero-copy">
-          하루 1분, 오늘의 운세를 뽑고 공유하세요. 캐릭터 톤은 <strong>신비한 귀여움</strong>으로
-          설계되어 있어요.
-        </p>
-        <div className="streak-pill">현재 streak: {streak}일</div>
-      </section>
-
-      <section className="card controls">
-        <h2>카테고리 선택</h2>
-        <div className="category-grid">
-          {CATEGORIES.map((category) => (
-            <button
-              key={category.key}
-              type="button"
-              className={category.key === selectedCategory ? "chip active" : "chip"}
-              onClick={() => setSelectedCategory(category.key)}
-            >
-              {category.label}
-            </button>
-          ))}
-        </div>
-
-        <button
-          type="button"
-          className="primary-button"
-          disabled={loading}
-          onClick={() => fetchDraw(selectedCategory)}
-        >
-          {loading ? "운세 확인 중..." : "오늘의 운세 다시 뽑기"}
-        </button>
-      </section>
-
-      <section className="card result">
-        <header className="result-header">
-          <h2>오늘의 결과</h2>
-          <span>{draw ? formatKoreanDate(draw.dateKey) : formatKoreanDate(toDateKey(new Date()))}</span>
+    <main className="premium-root">
+      <section className="app-frame">
+        <header className="app-header">
+          <div className="app-title-block">
+            <p className="app-kicker">Daily Orbit</p>
+            <h1 className="app-title">Daily Fortune</h1>
+          </div>
+          <div className="streak-token">Streak {streak}d</div>
         </header>
 
-        {error ? <p className="error-text">{error}</p> : null}
+        <section className="insight-hero" aria-label="today insight">
+          <p className="insight-kicker">Today&apos;s insight</p>
+          <p className="insight-main">{heroHeadline}</p>
+          <p className="insight-sub">A focused one-line read, then your next action.</p>
+          <p className="insight-date">{displayDate}</p>
+        </section>
 
-        {draw ? (
-          <>
-            <p className="category-tag">{draw.categoryLabel}</p>
-            <h3 className="headline">{draw.fortune.headline}</h3>
-            <p className="detail">{draw.fortune.detail}</p>
+        <section className="block-card">
+          <div className="block-head">
+            <h2 className="block-title">Select a category</h2>
+            <span className="block-meta">Current: {selectedLabel}</span>
+          </div>
 
-            <div className="luck-grid">
-              <div>
-                <small>행운 컬러</small>
-                <strong>{draw.fortune.luckyColor}</strong>
-              </div>
-              <div>
-                <small>행운 숫자</small>
-                <strong>{draw.fortune.luckyNumber}</strong>
-              </div>
-              <div>
-                <small>무드 태그</small>
-                <strong>{draw.fortune.moodTag}</strong>
-              </div>
-            </div>
-
-            <div className="action-row">
-              <button type="button" className="secondary-button" onClick={handleShare}>
-                결과 공유하기
-              </button>
+          <div className="category-grid">
+            {CATEGORIES.map((category) => (
               <button
+                key={category.key}
                 type="button"
-                className="secondary-button"
-                onClick={() => setDeepUnlocked((prev) => !prev)}
+                className={category.key === selectedCategory ? "category-item active" : "category-item"}
+                onClick={() => setSelectedCategory(category.key)}
               >
-                심화 해석 열기 (0.5 USDC 데모)
+                <span className="category-label">{category.label}</span>
+                <span className="category-hint">{category.hint}</span>
               </button>
-            </div>
+            ))}
+          </div>
 
-            {deepUnlocked ? (
-              <article className="deep-reading">
-                <h4>심화 해석</h4>
-                <ul>
-                  <li>기회: 오늘은 작게 시작한 대화가 좋은 연결로 확장됩니다.</li>
-                  <li>주의: 빠른 결정보다 맥락 확인을 먼저 해보세요.</li>
-                  <li>관계: 먼저 연락하면 생각보다 따뜻한 반응을 얻을 수 있어요.</li>
-                  <li>행동: 저녁 전에 10분만 오늘 계획을 정리해 보세요.</li>
-                </ul>
-                <p className="disclaimer">현재는 결제 UX 데모이며, 실제 온체인 결제 연동 전 단계입니다.</p>
+          <button
+            type="button"
+            className="primary-action"
+            disabled={loading}
+            onClick={() => fetchDraw(selectedCategory)}
+          >
+            {loading ? "Loading your fortune..." : "Check today's fortune"}
+          </button>
+        </section>
+
+        <section className="block-card result-card">
+          <div className="block-head">
+            <h2 className="block-title">Your reading</h2>
+            <span className="block-meta">{displayDate}</span>
+          </div>
+
+          {error ? <p className="error-copy">{error}</p> : null}
+
+          {draw ? (
+            <>
+              <article>
+                <p className="result-chip">{draw.categoryLabel}</p>
+                <h3 className="result-title">{draw.fortune.headline}</h3>
+                <p className="result-body">{draw.fortune.detail}</p>
               </article>
-            ) : null}
-          </>
-        ) : (
-          <p className="empty-text">운세를 불러오면 결과가 여기에 표시됩니다.</p>
-        )}
+
+              <div className="metrics-grid">
+                <div className="metric">
+                  <small>Lucky color</small>
+                  <strong>{draw.fortune.luckyColor}</strong>
+                </div>
+                <div className="metric">
+                  <small>Lucky number</small>
+                  <strong>{draw.fortune.luckyNumber}</strong>
+                </div>
+                <div className="metric">
+                  <small>Mood tag</small>
+                  <strong>{draw.fortune.moodTag}</strong>
+                </div>
+              </div>
+
+              <div className="action-group">
+                <button type="button" className="tertiary-action" onClick={handleShare}>
+                  Share result
+                </button>
+                <button
+                  type="button"
+                  className="tertiary-action"
+                  onClick={() => setDeepUnlocked((prev) => !prev)}
+                >
+                  Unlock deep reading (0.5 USDC demo)
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="empty-copy">Pick a category and tap the button to load your reading.</p>
+          )}
+
+          {deepUnlocked ? (
+            <section className="deep-card">
+              <h4 className="deep-title">Deep reading</h4>
+              <ul className="deep-list">
+                <li>Opportunity: Start one meaningful conversation early today.</li>
+                <li>Watch out: Don&apos;t rush decisions before checking context.</li>
+                <li>Relationships: A clear and kind message can improve trust.</li>
+                <li>Action: Spend ten minutes outlining your next step tonight.</li>
+              </ul>
+              <p className="tiny-note">
+                This is currently a payment UX demo before live onchain settlement.
+              </p>
+            </section>
+          ) : null}
+        </section>
       </section>
+
+      {notice ? <div className="toast">{notice}</div> : null}
     </main>
   );
 }
