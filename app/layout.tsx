@@ -5,7 +5,10 @@ import { Providers } from "./providers";
 
 export const metadata: Metadata = {
   title: "Daily Orbit",
-  description: "Daily Orbit on Base with onchain USDC unlocks"
+  description: "Daily Orbit on Base with onchain USDC unlocks",
+  other: {
+    "base:app_id": "69a98a0a0050dd24efcc1e8c"
+  }
 };
 
 export default function RootLayout({
