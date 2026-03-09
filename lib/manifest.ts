@@ -4,7 +4,7 @@ export type AccountAssociation = {
   signature: string;
 };
 
-const DEFAULT_BASE_URL = "https://daily-orbit-ten.vercel.app";
+const DEFAULT_BASE_URL = "https://jerusalem-ebon.vercel.app";
 
 export function normalizeBaseUrl(rawBaseUrl: string): string {
   return rawBaseUrl.endsWith("/") ? rawBaseUrl.slice(0, -1) : rawBaseUrl;
