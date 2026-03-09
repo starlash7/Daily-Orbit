@@ -24,7 +24,7 @@ export const metadata: Metadata = {
     images: [heroImageUrl]
   },
   other: {
-    "base:app_id": "69a98a0a0050dd24efcc1e8c",
+    "base:app_id": "69ae65742976dc607e3a666d",
     "fc:miniapp": JSON.stringify({
       version: "next",
       imageUrl: heroImageUrl,
