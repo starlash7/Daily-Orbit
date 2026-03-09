@@ -16,7 +16,7 @@ import {
 } from "wagmi";
 import { erc20Abi } from "viem";
 
-import type { FortuneCategory } from "@/lib/fortune";
+import { buildDeepReading, type FortuneCategory } from "@/lib/fortune";
 import {
   BASE_USDC_ADDRESS,
   getDeepReadingPriceLabel,
@@ -69,12 +69,25 @@ type HistoryEntry = {
 type ThemeMode = "light" | "dark";
 type TabKey = "today" | "history" | "profile";
 
+type StoredDailyDraw = {
+  dateKey: string;
+  category: FortuneCategory;
+  result: DrawResponse;
+};
+
 const CATEGORIES: Array<{ key: FortuneCategory; label: string; hint: string }> = [
   { key: "love", label: "Love", hint: "Connection and closeness" },
   { key: "money", label: "Money", hint: "Spending and timing" },
   { key: "career", label: "Career", hint: "Work and momentum" },
   { key: "health", label: "Health", hint: "Energy and balance" }
 ];
+
+const CATEGORY_FLAVORS: Record<FortuneCategory, string> = {
+  love: "Soft spark",
+  money: "Lucky timing",
+  career: "Clear momentum",
+  health: "Gentle reset"
+};
 
 const ONBOARDING_STEPS = [
   {
@@ -98,6 +111,8 @@ const STORAGE_KEYS = {
   streakDate: "daily-orbit:last-draw-date",
   streakCount: "daily-orbit:streak-count",
   drawHistory: "daily-orbit:draw-history",
+  dailyDraw: "daily-orbit:daily-draw",
+  unlockedDrawIds: "daily-orbit:unlocked-draw-ids",
   onboarding: "daily-orbit:onboarding-complete",
   theme: "daily-orbit:theme"
 } as const;
@@ -130,15 +145,6 @@ function getUserFriendlyError(message: string): string {
   return "Payment failed. Please try again.";
 }
 
-function getInitials(name: string): string {
-  return name
-    .split(" ")
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-}
-
 function getPreferredTheme(): ThemeMode {
   if (typeof window === "undefined") return "light";
 
@@ -156,6 +162,47 @@ function getDefaultProfile(): ProfileState {
   };
 }
 
+function readStoredDailyDraw(): StoredDailyDraw | null {
+  if (typeof window === "undefined") return null;
+
+  const rawValue = window.localStorage.getItem(STORAGE_KEYS.dailyDraw);
+  if (!rawValue) return null;
+
+  try {
+    return JSON.parse(rawValue) as StoredDailyDraw;
+  } catch {
+    window.localStorage.removeItem(STORAGE_KEYS.dailyDraw);
+    return null;
+  }
+}
+
+function saveStoredDailyDraw(entry: StoredDailyDraw): void {
+  window.localStorage.setItem(STORAGE_KEYS.dailyDraw, JSON.stringify(entry));
+}
+
+function clearStoredDailyDraw(): void {
+  window.localStorage.removeItem(STORAGE_KEYS.dailyDraw);
+}
+
+function readUnlockedDrawIds(): string[] {
+  if (typeof window === "undefined") return [];
+
+  const rawValue = window.localStorage.getItem(STORAGE_KEYS.unlockedDrawIds);
+  if (!rawValue) return [];
+
+  try {
+    const parsed = JSON.parse(rawValue) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
+  } catch {
+    window.localStorage.removeItem(STORAGE_KEYS.unlockedDrawIds);
+    return [];
+  }
+}
+
+function saveUnlockedDrawIds(drawIds: string[]): void {
+  window.localStorage.setItem(STORAGE_KEYS.unlockedDrawIds, JSON.stringify(drawIds));
+}
+
 export default function HomePage(): React.JSX.Element {
   const [selectedCategory, setSelectedCategory] = useState<FortuneCategory>("love");
   const [draw, setDraw] = useState<DrawResponse | null>(null);
@@ -163,6 +210,7 @@ export default function HomePage(): React.JSX.Element {
   const [error, setError] = useState<string>("");
   const [streak, setStreak] = useState<number>(0);
   const [deepUnlocked, setDeepUnlocked] = useState<boolean>(false);
+  const [hasUsedFreeDrawToday, setHasUsedFreeDrawToday] = useState<boolean>(false);
   const [notice, setNotice] = useState<string>("");
   const [paymentHash, setPaymentHash] = useState<`0x${string}` | undefined>(undefined);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -198,6 +246,7 @@ export default function HomePage(): React.JSX.Element {
   const hasRecipient = hasValidPaymentRecipient();
   const deepReadingPriceLabel = getDeepReadingPriceLabel();
   const deepReadingPriceUnits = getDeepReadingPriceUnits();
+  const todayKey = toDateKey(new Date());
 
   const updateHistory = useCallback((entry: HistoryEntry) => {
     const next = [entry, ...history.filter((item) => item.drawId !== entry.drawId)].slice(0, 8);
@@ -222,8 +271,30 @@ export default function HomePage(): React.JSX.Element {
     setStreak(nextCount);
   }, []);
 
+  const markDrawUnlocked = useCallback((drawId: string) => {
+    const existing = readUnlockedDrawIds();
+    const next = existing.includes(drawId) ? existing : [...existing, drawId];
+    saveUnlockedDrawIds(next);
+    setDeepUnlocked(true);
+  }, []);
+
   const fetchDraw = useCallback(
     async (category: FortuneCategory, walletAddress?: string) => {
+      const storedDraw = readStoredDailyDraw();
+      if (storedDraw?.dateKey === todayKey) {
+        setSelectedCategory(storedDraw.category);
+        setDraw(storedDraw.result);
+        setHasUsedFreeDrawToday(true);
+        setDeepUnlocked(readUnlockedDrawIds().includes(storedDraw.result.drawId));
+        setNotice("Today's free draw is already saved.");
+        return;
+      }
+
+      if (storedDraw) {
+        clearStoredDailyDraw();
+        setHasUsedFreeDrawToday(false);
+      }
+
       setLoading(true);
       setError("");
 
@@ -236,9 +307,15 @@ export default function HomePage(): React.JSX.Element {
 
         const result = (await response.json()) as DrawResponse;
         setDraw(result);
-        setDeepUnlocked(false);
+        setDeepUnlocked(readUnlockedDrawIds().includes(result.drawId));
+        setHasUsedFreeDrawToday(true);
         setPaymentHash(undefined);
         setPaymentRequestId("");
+        saveStoredDailyDraw({
+          dateKey: result.dateKey,
+          category,
+          result
+        });
         updateStreak(result.dateKey);
         updateHistory({
           drawId: result.drawId,
@@ -257,12 +334,13 @@ export default function HomePage(): React.JSX.Element {
         setLoading(false);
       }
     },
-    [updateHistory, updateStreak]
+    [todayKey, updateHistory, updateStreak]
   );
 
   useEffect(() => {
     const storedHistory = window.localStorage.getItem(STORAGE_KEYS.drawHistory);
     const storedStreak = Number(window.localStorage.getItem(STORAGE_KEYS.streakCount) || "0");
+    const storedDraw = readStoredDailyDraw();
 
     if (Number.isFinite(storedStreak)) {
       setStreak(storedStreak);
@@ -284,6 +362,15 @@ export default function HomePage(): React.JSX.Element {
     const hasSeenOnboarding = window.localStorage.getItem(STORAGE_KEYS.onboarding) === "true";
     setShowOnboarding(!hasSeenOnboarding);
 
+    if (storedDraw?.dateKey === todayKey) {
+      setSelectedCategory(storedDraw.category);
+      setDraw(storedDraw.result);
+      setHasUsedFreeDrawToday(true);
+      setDeepUnlocked(readUnlockedDrawIds().includes(storedDraw.result.drawId));
+    } else if (storedDraw) {
+      clearStoredDailyDraw();
+    }
+
     void sdk.actions.ready().catch(() => undefined);
 
     void sdk.isInMiniApp().then(setIsInsideMiniApp).catch(() => setIsInsideMiniApp(false));
@@ -302,7 +389,7 @@ export default function HomePage(): React.JSX.Element {
         });
       })
       .catch(() => undefined);
-  }, []);
+  }, [todayKey]);
 
   useEffect(() => {
     if (address) {
@@ -325,10 +412,13 @@ export default function HomePage(): React.JSX.Element {
 
   useEffect(() => {
     if (isPaymentSuccess) {
+      if (draw) {
+        markDrawUnlocked(draw.drawId);
+      }
       setDeepUnlocked(true);
       setNotice("Payment confirmed on Base. Deep reading unlocked.");
     }
-  }, [isPaymentSuccess]);
+  }, [draw, isPaymentSuccess, markDrawUnlocked]);
 
   useEffect(() => {
     if (!paymentReceiptError) return;
@@ -353,6 +443,9 @@ export default function HomePage(): React.JSX.Element {
         if (cancelled) return;
 
         if (status.status === "completed") {
+          if (draw) {
+            markDrawUnlocked(draw.drawId);
+          }
           setDeepUnlocked(true);
           setPaymentRequestId("");
           setNotice("Sponsored payment confirmed. Deep reading unlocked.");
@@ -390,7 +483,7 @@ export default function HomePage(): React.JSX.Element {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [deepUnlocked, paymentRequestId]);
+  }, [deepUnlocked, draw, markDrawUnlocked, paymentRequestId]);
 
   useEffect(() => {
     if (autoConnectTried || isConnected || connectors.length === 0) return;
@@ -422,14 +515,17 @@ export default function HomePage(): React.JSX.Element {
     };
   }, [autoConnectTried, connectAsync, connectors, isConnected]);
 
-  useEffect(() => {
-    if (draw) return;
-    void fetchDraw("love", address).catch(() => undefined);
-  }, [address, draw, fetchDraw]);
-
   const shareText = useMemo(() => {
     if (!draw) return "";
     return `Daily Orbit ${draw.categoryLabel}: ${draw.fortune.headline} | Lucky number ${draw.fortune.luckyNumber}`;
+  }, [draw]);
+
+  const deepReading = useMemo(() => {
+    if (!draw) return [];
+    return buildDeepReading({
+      category: draw.category,
+      fortune: draw.fortune
+    });
   }, [draw]);
 
   const handleShare = useCallback(async () => {
@@ -486,7 +582,6 @@ export default function HomePage(): React.JSX.Element {
   const handleDisconnectWallet = useCallback(() => {
     disconnect();
     setNotice("Wallet disconnected.");
-    setDeepUnlocked(false);
     setPaymentHash(undefined);
     setPaymentRequestId("");
   }, [disconnect]);
@@ -574,7 +669,10 @@ export default function HomePage(): React.JSX.Element {
 
   const displayDate = draw ? formatDisplayDate(draw.dateKey) : formatDisplayDate(toDateKey(new Date()));
   const selectedLabel = CATEGORIES.find((item) => item.key === selectedCategory)?.label ?? "Love";
-  const heroHeadline = draw?.fortune.headline ?? "Check your daily flow in under a minute.";
+  const heroHeadline = draw?.fortune.headline ?? "Pull one card and get one clear sign for today.";
+  const freeDrawStatus = hasUsedFreeDrawToday ? "Free draw claimed" : "Free draw ready";
+  const walletStatus = isConnected ? "Wallet synced" : "Wallet optional";
+  const activeFlavor = CATEGORY_FLAVORS[draw?.category ?? selectedCategory];
 
   const unlockButtonLabel = deepUnlocked
     ? "Deep reading unlocked"
@@ -597,50 +695,22 @@ export default function HomePage(): React.JSX.Element {
     <main className="app-root">
       <div className="app-shell">
         <header className="topbar">
-          <div>
-            <p className="brand-label">Daily Orbit</p>
-            <h1 className="brand-title">A premium daily read on Base</h1>
+          <div className="brand-lockup">
+            <div className="brand-mark">
+              <img src="/miniapp/icon.png" alt="Daily Orbit" className="brand-mark-image" />
+            </div>
+            <div className="brand-copy">
+              <p className="brand-label">Base Mini App</p>
+              <h1 className="brand-title">Daily Orbit</h1>
+              <p className="brand-subtitle">A daily fortune ritual built for one-thumb use and instant delight.</p>
+            </div>
           </div>
 
           <div className="topbar-actions">
-            <button type="button" className="theme-toggle" onClick={handleThemeToggle}>
-              {theme === "light" ? "Dark" : "Light"}
-            </button>
+            <span className="surface-pill">{freeDrawStatus}</span>
             <span className="streak-pill">{streak} day streak</span>
           </div>
         </header>
-
-        <section className="profile-banner">
-          <div className="avatar-shell">
-            {profile.avatarUrl ? (
-              <img src={profile.avatarUrl} alt={profile.name} className="avatar-image" />
-            ) : (
-              <span>{getInitials(profile.name)}</span>
-            )}
-          </div>
-
-          <div className="profile-copy">
-            <p className="profile-name">{profile.name}</p>
-            <p className="profile-username">{profile.username}</p>
-          </div>
-
-          <div className="profile-actions">
-            {isConnected ? (
-              <button type="button" className="secondary-button" onClick={handleDisconnectWallet}>
-                Connected
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="secondary-button accent"
-                onClick={handleConnectWallet}
-                disabled={isConnecting}
-              >
-                {isConnecting ? "Connecting..." : "Connect Base"}
-              </button>
-            )}
-          </div>
-        </section>
 
         <nav className="bottom-nav" aria-label="Primary navigation">
           <button
@@ -672,12 +742,31 @@ export default function HomePage(): React.JSX.Element {
         {activeTab === "today" ? (
           <>
             <section className="hero-card">
-              <div>
-                <p className="section-eyebrow">Today&apos;s insight</p>
-                <h2 className="hero-headline">{heroHeadline}</h2>
-                <p className="hero-caption">{displayDate}</p>
+              <div className="hero-grid">
+                <div className="hero-copy">
+                  <p className="section-eyebrow">Today&apos;s orbit</p>
+                  <h2 className="hero-headline">{heroHeadline}</h2>
+                  <p className="hero-caption">{displayDate}</p>
+                  <div className="hero-highlights" aria-label="Experience highlights">
+                    <span className="hero-pill">{selectedLabel}</span>
+                    <span className="hero-pill">{activeFlavor}</span>
+                  </div>
+                  <p className="hero-note">Tap once, reveal one fortune card, and keep the screen focused on the magic moment.</p>
+                </div>
+
+                <div className="hero-visual" aria-hidden="true">
+                  <div className="orbit-stage">
+                    <span className="orbit-ring orbit-ring-outer" />
+                    <span className="orbit-ring orbit-ring-inner" />
+                    <span className="orbit-spark orbit-spark-top" />
+                    <span className="orbit-spark orbit-spark-bottom" />
+                    <div className="orbit-core">
+                      <img src="/miniapp/icon.png" alt="" className="orbit-core-image" />
+                    </div>
+                  </div>
+                  <p className="hero-visual-note">Reveal your card</p>
+                </div>
               </div>
-              <p className="hero-note">Clear first action, no clutter, and one-thumb navigation.</p>
             </section>
 
             <section className="panel-card">
@@ -696,6 +785,7 @@ export default function HomePage(): React.JSX.Element {
                     type="button"
                     className={category.key === selectedCategory ? "category-item active" : "category-item"}
                     onClick={() => setSelectedCategory(category.key)}
+                    disabled={hasUsedFreeDrawToday}
                   >
                     <span className="category-label">{category.label}</span>
                     <span className="category-hint">{category.hint}</span>
@@ -706,11 +796,19 @@ export default function HomePage(): React.JSX.Element {
               <button
                 type="button"
                 className="primary-button"
-                disabled={loading}
+                disabled={loading || hasUsedFreeDrawToday}
                 onClick={() => fetchDraw(selectedCategory, address)}
               >
-                {loading ? "Loading your fortune..." : "Check today's fortune"}
+                {loading
+                  ? "Loading your fortune..."
+                  : hasUsedFreeDrawToday
+                    ? "Daily free draw complete"
+                    : "Check daily fortune"}
               </button>
+
+              {hasUsedFreeDrawToday ? (
+                <p className="support-copy">You have already used today&apos;s free draw. Come back tomorrow for a new card.</p>
+              ) : null}
             </section>
 
             <section className="panel-card">
@@ -727,9 +825,19 @@ export default function HomePage(): React.JSX.Element {
               {draw ? (
                 <>
                   <article className="reading-card">
-                    <p className="result-chip">{draw.categoryLabel}</p>
-                    <h4 className="reading-title">{draw.fortune.headline}</h4>
-                    <p className="reading-body">{draw.fortune.detail}</p>
+                    <div className={`fortune-visual ${draw.category}`}>
+                      <span className="fortune-visual-badge">{CATEGORY_FLAVORS[draw.category]}</span>
+                      <span className="fortune-visual-number">#{draw.fortune.luckyNumber}</span>
+                      <div className="fortune-image-shell">
+                        <img src="/miniapp/icon.png" alt="" className="fortune-image" />
+                      </div>
+                    </div>
+
+                    <div className="fortune-copy">
+                      <p className="result-chip">{draw.categoryLabel}</p>
+                      <h4 className="reading-title">{draw.fortune.headline}</h4>
+                      <p className="reading-body">{draw.fortune.detail}</p>
+                    </div>
                   </article>
 
                   <div className="metrics-grid">
@@ -789,17 +897,26 @@ export default function HomePage(): React.JSX.Element {
                     <section className="deep-card">
                       <h4 className="deep-title">Deep reading</h4>
                       <ul className="deep-list">
-                        <li>Opportunity: Start one meaningful conversation early today.</li>
-                        <li>Watch out: Do not rush decisions before checking context.</li>
-                        <li>Relationships: A kind message improves trust faster than silence.</li>
-                        <li>Action: Give tonight ten minutes to plan your next move with calm intent.</li>
+                        {deepReading.map((item) => (
+                          <li key={item.title}>
+                            {item.title}: {item.content}
+                          </li>
+                        ))}
                       </ul>
                       <p className="tiny-note">Onchain payment confirmed on Base.</p>
                     </section>
                   ) : null}
                 </>
               ) : (
-                <p className="empty-copy">Pick a category and tap the button to load your reading.</p>
+                <div className={`empty-state-card ${selectedCategory}`}>
+                  <div className="fortune-image-shell preview">
+                    <img src="/miniapp/icon.png" alt="" className="fortune-image" />
+                  </div>
+                  <div>
+                    <p className="result-chip">{selectedLabel}</p>
+                    <p className="empty-copy">Pick a category and reveal a fortune card with image, mood, and lucky number.</p>
+                  </div>
+                </div>
               )}
             </section>
           </>
@@ -849,17 +966,26 @@ export default function HomePage(): React.JSX.Element {
                 {profile.avatarUrl ? (
                   <img src={profile.avatarUrl} alt={profile.name} className="avatar-image" />
                 ) : (
-                  <span>{getInitials(profile.name)}</span>
+                  <img src="/miniapp/icon.png" alt="Orbit mascot" className="avatar-image" />
                 )}
               </div>
               <div>
                 <p className="profile-name">{profile.name}</p>
                 <p className="profile-username">{profile.username}</p>
-                <p className="support-copy">Wallet status: {isConnected ? "Connected on Base" : "Not connected"}</p>
+                <p className="support-copy">Wallet status: {walletStatus}</p>
               </div>
             </div>
 
             <div className="settings-grid">
+              <button
+                type="button"
+                className="settings-card"
+                onClick={isConnected ? handleDisconnectWallet : handleConnectWallet}
+                disabled={isConnecting}
+              >
+                <span>Wallet</span>
+                <strong>{isConnected ? "Disconnect Base" : isConnecting ? "Connecting..." : "Connect Base"}</strong>
+              </button>
               <button type="button" className="settings-card" onClick={handleThemeToggle}>
                 <span>Theme</span>
                 <strong>Switch to {theme === "light" ? "dark" : "light"}</strong>
@@ -878,16 +1004,18 @@ export default function HomePage(): React.JSX.Element {
             </div>
 
             <div className="callout-card">
-              <h4>Featured checklist progress</h4>
+              <h4>Mini app polish review</h4>
               <ul className="checklist-list">
-                        <li>Bottom navigation and centered CTAs are in place.</li>
-                        <li>Light and dark mode are both supported.</li>
-                        <li>Wallet can auto-connect inside supported mini app clients.</li>
-                        <li>Deep reading now uses Base Pay inside mini app for a sponsored checkout flow.</li>
-                      </ul>
-                    </div>
+                <li>Daily draw is now restored cleanly when the user returns.</li>
+                <li>The premium unlock state stays visible after refresh.</li>
+                <li>Hero and status surfaces are tuned for mini app scanning speed.</li>
+                <li>Base Pay remains the primary paid unlock path inside mini app clients.</li>
+              </ul>
+            </div>
           </section>
         ) : null}
+
+        {isInsideMiniApp ? <footer className="miniapp-footer">Powered by pixy7</footer> : null}
       </div>
 
       {showOnboarding ? (

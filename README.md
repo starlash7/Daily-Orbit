@@ -32,6 +32,22 @@ Copy `.env.example` to `.env.local` and set values.
 - `FARCASTER_PAYLOAD`
 - `FARCASTER_SIGNATURE`
 
+## Account Association
+
+Before submitting the Mini App, generate `accountAssociation` values against your deployed HTTPS URL.
+
+1. Set `NEXT_PUBLIC_URL` to your real production or preview domain.
+2. Run `npm run miniapp:manifest`
+3. Paste the generated values into:
+   - `FARCASTER_HEADER`
+   - `FARCASTER_PAYLOAD`
+   - `FARCASTER_SIGNATURE`
+
+Manifest debug checks:
+
+- `/.well-known/farcaster.json` should return `X-MiniApp-Account-Association: configured`
+- If it returns `missing`, the Mini App manifest is still unsigned
+
 Manifest check:
 
 - `http://localhost:3000/.well-known/farcaster.json`

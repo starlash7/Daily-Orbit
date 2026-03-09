@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "miniapp:manifest": "npx create-onchain --manifest"
   },
   "dependencies": {
     "@base-org/account": "^2.5.2",

@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
-function normalizeBaseUrl(rawBaseUrl: string): string {
-  return rawBaseUrl.endsWith("/") ? rawBaseUrl.slice(0, -1) : rawBaseUrl;
-}
+import {
+  getAccountAssociation,
+  getBaseUrl,
+  getCanonicalDomain,
+  hasAccountAssociation,
+  normalizeBaseUrl
+} from "@/lib/manifest";
 
 function buildAppUrl(baseUrl: string, path = ""): string {
   const normalizedBase = normalizeBaseUrl(baseUrl);
@@ -10,9 +14,11 @@ function buildAppUrl(baseUrl: string, path = ""): string {
 }
 
 export function GET(request: NextRequest): NextResponse {
-  const envBase = process.env.NEXT_PUBLIC_URL?.trim();
-  const baseUrl = envBase ? normalizeBaseUrl(envBase) : request.nextUrl.origin;
+  const baseUrl = getBaseUrl(request.nextUrl.origin);
+  const accountAssociation = getAccountAssociation();
+  const hasAssociation = hasAccountAssociation(accountAssociation);
   const isProduction = request.nextUrl.origin.includes("daily-orbit-ten.vercel.app");
+  const canonicalDomain = getCanonicalDomain(baseUrl);
 
   const iconUrl = buildAppUrl(baseUrl, "/miniapp/icon.png");
   const homeUrl = buildAppUrl(baseUrl, "/");
@@ -34,23 +40,22 @@ export function GET(request: NextRequest): NextResponse {
     subtitle: "Daily fortune on Base",
     description:
       "Check a premium daily reading, save your streak, and unlock the deeper card with a simple onchain action.",
+    canonicalDomain,
     screenshotUrls,
     primaryCategory: "entertainment",
+    requiredChains: ["eip155:8453"],
     tags: ["fortune", "dailyread", "wellbeing"],
     heroImageUrl,
     tagline: "Read today with calm clarity",
     ogTitle: "Daily Orbit",
     ogDescription: "A premium daily fortune with an optional onchain unlock on Base.",
     ogImageUrl: heroImageUrl,
+    requiredCapabilities: ["actions.ready"],
     noindex: !isProduction
   };
 
   const manifest = {
-    accountAssociation: {
-      header: process.env.FARCASTER_HEADER || "",
-      payload: process.env.FARCASTER_PAYLOAD || "",
-      signature: process.env.FARCASTER_SIGNATURE || ""
-    },
+    accountAssociation,
     frame: {
       version: "1",
       name: "Daily Orbit",
@@ -66,7 +71,8 @@ export function GET(request: NextRequest): NextResponse {
 
   return NextResponse.json(manifest, {
     headers: {
-      "Cache-Control": "no-store"
+      "Cache-Control": "no-store",
+      "X-MiniApp-Account-Association": hasAssociation ? "configured" : "missing"
     }
   });
 }

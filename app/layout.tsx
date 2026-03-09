@@ -1,10 +1,18 @@
 import type { Metadata } from "next";
+import { Space_Grotesk } from "next/font/google";
+
+import { getBaseUrl } from "@/lib/manifest";
 
 import "./globals.css";
 import { Providers } from "./providers";
 
-const baseUrl = process.env.NEXT_PUBLIC_URL?.trim() || "https://daily-orbit-ten.vercel.app";
-const normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-space-grotesk"
+});
+
+const normalizedBaseUrl = getBaseUrl();
 const heroImageUrl = `${normalizedBaseUrl}/miniapp/cover.png`;
 
 export const metadata: Metadata = {
@@ -40,7 +48,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>): React.JSX.Element {
   return (
-    <html lang="en">
+    <html lang="en" className={spaceGrotesk.variable}>
       <body>
         <Providers>{children}</Providers>
       </body>

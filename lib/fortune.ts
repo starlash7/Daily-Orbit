@@ -8,6 +8,11 @@ export type Fortune = {
   moodTag: string;
 };
 
+export type DeepReadingSection = {
+  title: string;
+  content: string;
+};
+
 const CATEGORY_LABELS: Record<FortuneCategory, string> = {
   love: "Love",
   money: "Money",
@@ -295,4 +300,93 @@ export function drawDailyFortune(params: {
     categoryLabel: getCategoryLabel(category),
     fortune
   };
+}
+
+export function buildDeepReading(params: {
+  category: FortuneCategory;
+  fortune: Fortune;
+}): DeepReadingSection[] {
+  const { category, fortune } = params;
+
+  if (category === "love") {
+    return [
+      {
+        title: "Opportunity",
+        content: `Your ${fortune.moodTag} energy makes a direct message land better than a vague hint today.`
+      },
+      {
+        title: "Watch out",
+        content: `Do not let ${fortune.luckyNumber}-minute impatience turn a warm moment into mixed signals.`
+      },
+      {
+        title: "Relationships",
+        content: `A simple compliment or check-in works better than a long explanation while the tone stays ${fortune.moodTag}.`
+      },
+      {
+        title: "Action",
+        content: `Wear or notice ${fortune.luckyColor} and use it as your cue to start one sincere conversation.`
+      }
+    ];
+  }
+
+  if (category === "money") {
+    return [
+      {
+        title: "Opportunity",
+        content: `Your best financial move is a ${fortune.moodTag} review of small spending before the day speeds up.`
+      },
+      {
+        title: "Watch out",
+        content: `Avoid impulse purchases that feel urgent for less than ${fortune.luckyNumber} minutes.`
+      },
+      {
+        title: "Leverage",
+        content: `A visible budget line tied to ${fortune.luckyColor} will keep today's choices more intentional.`
+      },
+      {
+        title: "Action",
+        content: "Pause once before every non-essential payment and ask whether it improves tomorrow or only comforts today."
+      }
+    ];
+  }
+
+  if (category === "career") {
+    return [
+      {
+        title: "Opportunity",
+        content: `The ${fortune.moodTag} path wins today: one clean priority can move faster than several half-starts.`
+      },
+      {
+        title: "Watch out",
+        content: `Do not scatter your focus across more than ${Math.max(2, fortune.luckyNumber % 4 + 1)} active tasks.`
+      },
+      {
+        title: "Collaboration",
+        content: `A short update with concrete next steps will signal clarity more strongly than a polished summary.`
+      },
+      {
+        title: "Action",
+        content: `Use ${fortune.luckyColor} as your visual marker for the one task that must be completed before the day ends.`
+      }
+    ];
+  }
+
+  return [
+    {
+      title: "Opportunity",
+      content: `A ${fortune.moodTag} rhythm will give you more energy than pushing harder for a short burst.`
+    },
+    {
+      title: "Watch out",
+      content: `Do not ignore the early fatigue signal that shows up after about ${fortune.luckyNumber} focused minutes.`
+    },
+    {
+      title: "Recovery",
+      content: `Simple habits around ${fortune.luckyColor} cues, water, and rest will stabilize the rest of the day.`
+    },
+    {
+      title: "Action",
+      content: "Protect one small reset block today and treat it as productive work, not optional recovery."
+    }
+  ];
 }
