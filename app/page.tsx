@@ -379,7 +379,7 @@ export default function HomePage(): React.JSX.Element {
       .then((context: MiniAppContext) => {
         const user = context?.user ?? {};
         const displayName = user.displayName || user.username || "Orbit Explorer";
-        const username = user.username ? `@${user.username}` : user.fid ? `Base user ${user.fid}` : "Base mini app member";
+        const username = user.username ? `@${user.username}` : "Base mini app member";
         const avatarUrl = user.pfpUrl || user.avatarUrl || "";
 
         setProfile({

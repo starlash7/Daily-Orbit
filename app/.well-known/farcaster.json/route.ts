@@ -17,8 +17,8 @@ export function GET(request: NextRequest): NextResponse {
   const baseUrl = getBaseUrl(request.nextUrl.origin);
   const accountAssociation = getAccountAssociation();
   const hasAssociation = hasAccountAssociation(accountAssociation);
-  const isProduction = request.nextUrl.origin.includes("daily-orbit-ten.vercel.app");
   const canonicalDomain = getCanonicalDomain(baseUrl);
+  const shouldIndex = process.env.VERCEL_ENV === "production" && hasAssociation;
 
   const iconUrl = buildAppUrl(baseUrl, "/miniapp/icon.png");
   const homeUrl = buildAppUrl(baseUrl, "/");
@@ -51,7 +51,7 @@ export function GET(request: NextRequest): NextResponse {
     ogDescription: "A premium daily fortune with an optional onchain unlock on Base.",
     ogImageUrl: heroImageUrl,
     requiredCapabilities: ["actions.ready"],
-    noindex: !isProduction
+    noindex: !shouldIndex
   };
 
   const manifest = {
